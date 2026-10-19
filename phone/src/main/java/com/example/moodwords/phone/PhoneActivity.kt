@@ -1,5 +1,6 @@
 package com.example.moodwords.phone
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -66,7 +67,7 @@ private val scheme = lightColorScheme(
 )
 
 // ── 화면 상태 ─────────────────────────────────────────────
-private enum class Screen { HOME, ENERGY, VALENCE, CAUSE, RESULT, HISTORY, ABOUT, WEEK, GUIDE }
+private enum class Screen { HOME, ENERGY, VALENCE, CAUSE, RESULT, HISTORY, ABOUT, WEEK, GUIDE, RATE }
 
 private class Check {
     var energy by mutableStateOf<Energy?>(null)
@@ -103,6 +104,7 @@ fun PhoneApp() {
                         onAbout = { screen = Screen.ABOUT },
                         onWeek = { screen = Screen.WEEK },
                         onGuide = { screen = Screen.GUIDE },
+                        onRate = { screen = Screen.RATE },
                     )
                     Screen.ENERGY -> Question(
                         step = 1,
@@ -144,6 +146,7 @@ fun PhoneApp() {
                     Screen.HISTORY -> HistoryScreen(store, onBack = { screen = Screen.HOME })
                     Screen.ABOUT -> AboutScreen(onBack = { screen = Screen.HOME })
                     Screen.WEEK -> WeekScreen(store, onBack = { screen = Screen.HOME })
+                    Screen.RATE -> RateScreen(onBack = { screen = Screen.HOME })
                     Screen.GUIDE -> GuideScreen(onDone = { Guide.markSeen(context); screen = Screen.HOME })
                 }
             }
@@ -153,7 +156,7 @@ fun PhoneApp() {
 
 // ── 홈 ───────────────────────────────────────────────────
 @Composable
-private fun HomeScreen(onStart: () -> Unit, onHistory: () -> Unit, onAbout: () -> Unit, onWeek: () -> Unit, onGuide: () -> Unit) {
+private fun HomeScreen(onStart: () -> Unit, onHistory: () -> Unit, onAbout: () -> Unit, onWeek: () -> Unit, onGuide: () -> Unit, onRate: () -> Unit) {
     val context = LocalContext.current
     var update by remember { mutableStateOf<Updater.Release?>(null) }
     var showUpdate by remember { mutableStateOf(false) }
@@ -207,6 +210,13 @@ private fun HomeScreen(onStart: () -> Unit, onHistory: () -> Unit, onAbout: () -
             modifier = Modifier.fillMaxWidth().height(56.dp),
             shape = RoundedCornerShape(16.dp),
         ) { Text("이번 주 돌아보기", fontSize = 16.sp, color = Ink) }
+
+        Spacer(Modifier.height(12.dp))
+        OutlinedButton(
+            onClick = onRate,
+            modifier = Modifier.fillMaxWidth().height(56.dp),
+            shape = RoundedCornerShape(16.dp),
+        ) { Text("단어 점수 매기기 · 앱 개선 참여", fontSize = 16.sp, color = Ink) }
 
         Spacer(Modifier.height(28.dp))
         Text(
@@ -729,4 +739,162 @@ private fun BasisLabel(w: EmotionWord) {
         Basis.AI -> "AI 분류 · 연구에 없는 단어라 AI가 뜻을 보고 칸을 정했어요"
     }
     Text(text, fontSize = 12.sp, color = Muted, lineHeight = 17.sp)
+}
+
+
+// ── 단어 점수 매기기 (앱 개선 참여) ─────────────────────────
+@Composable
+private fun RateScreen(onBack: () -> Unit) {
+    val context = LocalContext.current
+    val ratings = remember { Ratings(context) }
+    var done by remember { mutableIntStateOf(ratings.count()) }
+    var batch by remember { mutableStateOf<List<EmotionWord>?>(null) }   // null = 안내 화면
+    var idx by remember { mutableIntStateOf(0) }
+
+    fun share() {
+        val text = ratings.exportText(BuildConfig.VERSION_CODE)
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_SUBJECT, "감정단어 점수")
+            putExtra(Intent.EXTRA_TEXT, text)
+        }
+        context.startActivity(Intent.createChooser(send, "점수 보내기"))
+        ratings.sentCount = ratings.count()
+    }
+
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp)) {
+        TextButton(onClick = onBack, contentPadding = PaddingValues(0.dp)) { Text("← 처음으로", color = Muted) }
+        val b = batch
+        when {
+            // 안내
+            b == null -> {
+                Text("단어 점수 매기기", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = Ink)
+                Spacer(Modifier.height(16.dp))
+                Text(
+                    "이 앱 단어 중 3분의 2는 연구에 없어서 AI가 칸을 정했어요. 여러 사람이 매긴 점수가 모이면, " +
+                        "그 단어들을 실제 사람들의 느낌에 맞는 칸으로 옮길 수 있어요.",
+                    fontSize = 16.sp, lineHeight = 25.sp, color = Ink
+                )
+                Spacer(Modifier.height(16.dp))
+                InfoCard(Color.White) {
+                    Text(
+                        "• 한 번에 10개, 2~3분이면 끝나요\n" +
+                            "• 단어마다 기분·에너지·익숙함을 1~7로 눌러요\n" +
+                            "• 정답은 없어요. 처음 떠오르는 느낌대로\n" +
+                            "• 모르는 단어는 '모르는 단어예요'를 누르면 돼요\n" +
+                            "• 점수는 이 폰에만 저장되고, '보내기'를 누를 때만 공유 창(카톡·메일 등)으로 나가요. 이름이나 기록은 들어가지 않아요",
+                        fontSize = 15.sp, lineHeight = 24.sp, color = Ink
+                    )
+                }
+                Spacer(Modifier.height(20.dp))
+                val left = remember(done) { ratings.remaining(context) }
+                if (done > 0) Text("지금까지 ${done}개 매겼어요 · 남은 단어 ${left}개", fontSize = 14.sp, color = Muted)
+                Spacer(Modifier.height(12.dp))
+                Button(
+                    onClick = { batch = ratings.nextBatch(context); idx = 0 },
+                    enabled = left > 0,
+                    modifier = Modifier.fillMaxWidth().height(56.dp),
+                    shape = RoundedCornerShape(16.dp),
+                ) { Text(if (left > 0) "시작하기" else "모든 단어를 매겼어요", fontSize = 17.sp, fontWeight = FontWeight.SemiBold) }
+                if (done > ratings.sentCount) {
+                    Spacer(Modifier.height(12.dp))
+                    OutlinedButton(
+                        onClick = { share() },
+                        modifier = Modifier.fillMaxWidth().height(56.dp),
+                        shape = RoundedCornerShape(16.dp),
+                    ) { Text("점수 보내기 (${done}개)", fontSize = 16.sp, color = Ink) }
+                }
+            }
+            // 10개 끝
+            idx >= b.size -> {
+                Spacer(Modifier.height(24.dp))
+                Text("고마워요!", fontSize = 32.sp, fontWeight = FontWeight.Black, color = Ink)
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    "지금까지 ${done}개를 매겼어요.\n보내 주시면 다음 버전에서 단어 위치를 고치는 데 써요.",
+                    fontSize = 16.sp, lineHeight = 25.sp, color = Ink
+                )
+                Spacer(Modifier.height(24.dp))
+                Button(
+                    onClick = { share() },
+                    modifier = Modifier.fillMaxWidth().height(56.dp),
+                    shape = RoundedCornerShape(16.dp),
+                ) { Text("점수 보내기", fontSize = 17.sp, fontWeight = FontWeight.SemiBold) }
+                Spacer(Modifier.height(12.dp))
+                OutlinedButton(
+                    onClick = { batch = ratings.nextBatch(context); idx = 0 },
+                    modifier = Modifier.fillMaxWidth().height(56.dp),
+                    shape = RoundedCornerShape(16.dp),
+                ) { Text("10개 더 하기", fontSize = 16.sp, color = Ink) }
+                TextButton(onClick = onBack) { Text("나중에", color = Muted) }
+            }
+            // 단어 하나
+            else -> {
+                val w = b[idx]
+                var p by remember(w) { mutableIntStateOf(0) }
+                var a by remember(w) { mutableIntStateOf(0) }
+                var f by remember(w) { mutableIntStateOf(0) }
+                var showMeaning by remember(w) { mutableStateOf(false) }
+                fun save(r: Rating) { ratings.add(r); done = ratings.count(); idx++ }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    repeat(b.size) { i ->
+                        Box(Modifier.weight(1f).height(4.dp).clip(RoundedCornerShape(2.dp)).background(if (i <= idx) Accent else Line))
+                    }
+                }
+                Spacer(Modifier.height(20.dp))
+                Text("${idx + 1} / ${b.size}", fontSize = 14.sp, color = Muted)
+                Spacer(Modifier.height(8.dp))
+                Text(w.word, fontSize = 40.sp, fontWeight = FontWeight.Black, color = Ink)
+                if (showMeaning) {
+                    Text(w.meaning, fontSize = 14.sp, lineHeight = 21.sp, color = Muted)
+                } else {
+                    Text(
+                        "뜻 보기", fontSize = 14.sp, color = Accent,
+                        modifier = Modifier.clickable { showMeaning = true }.padding(vertical = 4.dp)
+                    )
+                }
+                Spacer(Modifier.height(20.dp))
+                Scale("이 단어는 어떤 기분인가요?", "아주 불쾌", "아주 유쾌", p) { p = it }
+                Scale("몸의 에너지는 어느 정도인가요?", "아주 차분", "아주 들뜸", a) { a = it }
+                Scale("얼마나 익숙한 말인가요?", "처음 들음", "자주 씀", f) { f = it }
+                Spacer(Modifier.height(8.dp))
+                Button(
+                    onClick = { save(Rating(w.word, p, a, f, System.currentTimeMillis())) },
+                    enabled = p > 0 && a > 0 && f > 0,
+                    modifier = Modifier.fillMaxWidth().height(56.dp),
+                    shape = RoundedCornerShape(16.dp),
+                ) { Text(if (idx + 1 < b.size) "다음" else "마치기", fontSize = 17.sp, fontWeight = FontWeight.SemiBold) }
+                TextButton(
+                    onClick = { save(Rating(w.word, 0, 0, 1, System.currentTimeMillis())) },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("모르는 단어예요", color = Muted) }
+            }
+        }
+    }
+}
+
+/** 1~7 고르기 */
+@Composable
+private fun Scale(question: String, low: String, high: String, value: Int, onPick: (Int) -> Unit) {
+    Text(question, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = Ink)
+    Spacer(Modifier.height(8.dp))
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        for (n in 1..7) {
+            val on = n == value
+            Box(
+                Modifier.weight(1f).height(44.dp).clip(RoundedCornerShape(10.dp))
+                    .background(if (on) Accent else Color.White)
+                    .border(1.dp, if (on) Accent else Line, RoundedCornerShape(10.dp))
+                    .clickable { onPick(n) },
+                contentAlignment = Alignment.Center,
+            ) { Text("$n", fontSize = 16.sp, color = if (on) Color.White else Ink, fontWeight = FontWeight.SemiBold) }
+        }
+    }
+    Row(Modifier.fillMaxWidth().padding(top = 4.dp)) {
+        Text(low, fontSize = 12.sp, color = Muted)
+        Spacer(Modifier.weight(1f))
+        Text(high, fontSize = 12.sp, color = Muted)
+    }
+    Spacer(Modifier.height(20.dp))
 }

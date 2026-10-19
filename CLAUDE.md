@@ -41,4 +41,5 @@ Wear OS(갤럭시워치) 앱 + 안드로이드 폰 앱(워치 없는 사람용, 
 - `Guide.kt` 앱 소개(목적·사용법·요령·좋은 점·알아두세요). 첫 실행 시 표시, 홈에서 다시 보기
 - 기록 7번째 필드 = cause
 - `Updater.kt` 업데이트 확인·설치 (Channel WATCH/PHONE, PackageInstaller)
-- `phone/.../PhoneActivity.kt` 홈(3×3 지도) → 질문 3개 → 결과(근거 표시) → 기록, 연구 근거 화면
+- `phone/.../PhoneActivity.kt` 홈(3×3 지도) → 질문 3개 → 결과(근거 표시) → 기록, 연구 근거 화면, 단어 점수 매기기(RateScreen)
+- `Ratings.kt` 앱 개선 참여: AI 분류 단어에 기분·에너지·익숙함 1~7점(10개씩, 흔한 말부터). prefs "ratings"에만 저장, '보내기'는 Android 공유 창(텍스트 CSV, 익명 참여번호). 0 = 모르는 단어. 받은 점수는 평균 내서 emotions.json 칸 재배치에 사용(같은 기준 쾌≥4.5/≤3.5, 활성화≥4.8/≤3.8)
