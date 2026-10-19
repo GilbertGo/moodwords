@@ -635,10 +635,6 @@ fun WeekScreen(store: MoodStore) {
             item { Text(if (weeksAgo == 0) "이번 주" else "${weeksAgo}주 전", fontSize = 16.sp, fontWeight = FontWeight.Bold) }
             item { Text("${fmt.format(Date(w.start))} – ${fmt.format(Date(w.end - 1))}", fontSize = 11.sp, color = Color.Gray) }
             item { Text(w.insight, fontSize = 12.sp, textAlign = TextAlign.Center) }
-            if (w.needsCare) item {
-                Text("힘든 날이 많았네요. 가까운 사람이나 전문가에게 이야기해 보세요. 자살예방 상담전화 109에서 도움을 받을 수 있어요.",
-                    fontSize = 11.sp, textAlign = TextAlign.Center, color = Color(0xFFB9AEFF))
-            }
             if (w.count > 0) {
                 item {
                     // 기분 비율 막대

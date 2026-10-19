@@ -35,7 +35,6 @@ data class WeekSummary(
     val slots: Map<TimeSlot, List<MoodEntry>>,
     val causes: Map<Cause, Int>,
     val insight: String,
-    val needsCare: Boolean,                   // 안 좋은 쪽이 대부분인 주 → 도움 안내
 ) {
     val count get() = entries.size
     fun pct(n: Int) = if (count == 0) 0 else (n * 100.0 / count).roundToInt()
@@ -69,10 +68,8 @@ object Weekly {
         val slots = TimeSlot.entries.associateWith { s -> list.filter { TimeSlot.of(it.time) == s } }
         val causes = Cause.entries.associateWith { c -> list.count { it.cause == c } }.filterValues { it > 0 }
 
-        val badShare = if (list.isEmpty()) 0.0 else valence.getValue(Valence.BAD).toDouble() / list.size
-        val needsCare = list.size >= 5 && badShare >= 0.7
         return WeekSummary(start, end, list, days, valence, energy, topWords, slots, causes,
-            insight(list, valence, topWords, slots, causes, weeksAgo), needsCare)
+            insight(list, valence, topWords, slots, causes, weeksAgo))
     }
 
     /** 숫자에서 바로 나오는 사실만 문장으로 (해석·조언은 하지 않음) */

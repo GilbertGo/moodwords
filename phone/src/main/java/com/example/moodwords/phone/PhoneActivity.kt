@@ -601,13 +601,6 @@ private fun WeekScreen(store: MoodStore, onBack: () -> Unit) {
         // 한 줄 정리
         InfoCard(Color(0xFFEDEBFC)) {
             Text(w.insight, fontSize = 16.sp, lineHeight = 25.sp, color = Ink)
-            if (w.needsCare) {
-                Spacer(Modifier.height(10.dp))
-                Text(
-                    "힘든 날이 많았던 한 주네요. 혼자 견디지 말고 가까운 사람이나 전문가에게 이야기해 보세요. 보건복지부 자살예방 상담전화 109에서 도움을 받을 수 있어요.",
-                    fontSize = 14.sp, lineHeight = 21.sp, color = Color(0xFF5B4BDB)
-                )
-            }
         }
         if (w.count == 0) return@Column
 
