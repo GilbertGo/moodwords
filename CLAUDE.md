@@ -26,7 +26,7 @@ Wear OS(갤럭시워치) 앱 + 안드로이드 폰 앱(워치 없는 사람용, 
 - APK는 폰 브라우저로 Releases에서 받기. 소스 zip 폴더와 헷갈리지 않게 안내.
 
 ## 코드 구조
-- 모듈: `app`(워치), `phone`(폰, Material3), `shared`(단어 사전·기록·업데이트, 패키지 com.example.moodwords)
+- 모듈: `app`(워치, 이름 "감정단어 워치", 어두운 시계 아이콘), `phone`(폰, Material3, 이름 "감정단어", 밝은 3×3 아이콘), `shared`(단어 사전·기록·업데이트, 패키지 com.example.moodwords)
 - `shared/src/main/assets/emotions.json` 감정 단어 1,260개. 필드: w 단어, m 뜻(해요체 한 문장), e HIGH/MID/LOW, v GOOD/NEUTRAL/BAD, c 원인 태그(PEOPLE/WORK/SELF/BODY/ANY), r 흔함 1~3, (선택) s 논문 표기·p 쾌·a 활성화. 단어 추가 시 기존과 중복 금지
 - 연구 근거: 박인조·민경환(2005) 434개 평정. 쾌 ≥4.5 GOOD, ≤3.5 BAD / 활성화 ≥4.8 HIGH, ≤3.8 LOW. 친숙성 3 미만 단어는 사전 뜻 기준 위치 유지. 429개 연결, 그중 425개가 점수 그대로 배치(4개는 사전 뜻 유지). 나머지 831개는 AI 분류 — EmotionWord.basis(RESEARCH/RESEARCH_EXCEPTION/AI)로 결과 화면에 반드시 표시, 후보 칩은 연구 단어에 • 홈 3×3 예시 단어는 emotions.json의 실제 칸과 맞출 것
 - emotions.json 추가 필드: pm 감성 한 줄(앱 창작), f 감정 갈래 26개(JOY…CONFUSION)
