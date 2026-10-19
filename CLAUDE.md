@@ -30,6 +30,7 @@ Wear OS(갤럭시워치) 앱 + 안드로이드 폰 앱(워치 없는 사람용, 
 - 연구 근거: 박인조·민경환(2005) 434개 평정. 쾌 ≥4.5 GOOD, ≤3.5 BAD / 활성화 ≥4.8 HIGH, ≤3.8 LOW. 친숙성 3 미만 단어는 사전 뜻 기준 위치 유지. 429개 연결됨
 - `EmotionWords.kt` JSON 로드, 칸+원인으로 후보 정렬(원인 일치 → 흔한 말 순), 심박→에너지 추정
 - `HeartRate.kt` Health Services 심박 Flow (Guava 의존성 필요)
+- `Motion.kt` 가속도 센서 0.5초 창: movement(큰 동작 RMS, >0.8 이동 중)·tremor(약 3Hz 고역 RMS). 측정은 가만히 있는 시간 15초(최대 30초), 움직이는 동안 심박 버림. 떨림은 평소값(MoodStore.restingTremor) 대비 1.6배↑ 많음 → 에너지 한 단계 올림. 기록 6번째 필드에 tremor 저장
 - `MoodStore.kt` SharedPreferences 기록, 안정 심박 학습
 - `MainActivity.kt` 화면: home → measure → energy → valence → cause → result → history
 - `Updater.kt` 업데이트 확인·설치 (Channel WATCH/PHONE, PackageInstaller)

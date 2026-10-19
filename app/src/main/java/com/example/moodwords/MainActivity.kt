@@ -46,10 +46,13 @@ class MainActivity : ComponentActivity() {
 /** 한 번의 감정 체크 동안 화면 사이에서 공유하는 값 */
 class CheckState {
     var bpm by mutableStateOf<Int?>(null)
+    var tremor by mutableStateOf<Double?>(null)
+    var tremorLevel by mutableStateOf<TremorLevel?>(null)
+    var moved by mutableStateOf(false)
     var energy by mutableStateOf<Energy?>(null)
     var valence by mutableStateOf<Valence?>(null)
     var cause by mutableStateOf<Cause?>(null)
-    fun reset() { bpm = null; energy = null; valence = null; cause = null }
+    fun reset() { bpm = null; tremor = null; tremorLevel = null; moved = false; energy = null; valence = null; cause = null }
 }
 
 @Composable
@@ -68,9 +71,12 @@ fun MoodWordsApp() {
                 )
             }
             composable("measure") {
-                MeasureScreen(store) { bpm ->
-                    check.bpm = bpm
-                    check.energy = bpm?.let { EmotionWords.estimateEnergy(it.toDouble(), store.restingBpm) }
+                MeasureScreen(store) { m ->
+                    check.bpm = m.bpm
+                    check.tremor = m.tremor
+                    check.moved = m.moved
+                    check.tremorLevel = m.tremor?.let { tremorLevel(it, store.restingTremor) }
+                    check.energy = estimateEnergy(m.bpm, check.tremorLevel, store)
                     nav.navigate("energy") { popUpTo("home") }
                 }
             }
@@ -86,7 +92,7 @@ fun MoodWordsApp() {
             composable("result") {
                 ResultScreen(check) { word ->
                     store.add(
-                        MoodEntry(System.currentTimeMillis(), word, check.bpm, check.energy!!, check.valence!!)
+                        MoodEntry(System.currentTimeMillis(), word, check.bpm, check.energy!!, check.valence!!, check.tremor)
                     )
                     nav.navigate("history") { popUpTo("home") }
                 }
@@ -170,13 +176,40 @@ fun HomeScreen(onStart: () -> Unit, onHistory: () -> Unit) {
 /** Wear OS 6(API 36)부터 쓰이는 새 심박 권한 */
 private const val HR_PERMISSION_NEW = "android.permission.health.READ_HEART_RATE"
 
+/** 측정 결과: 가만히 있을 때의 평균 심박과 떨림 */
+data class Measurement(val bpm: Int?, val tremor: Double?, val moved: Boolean)
+
+/** 심박(평소 대비) + 떨림으로 에너지 추정. 심박이 없으면 추정하지 않음 */
+fun estimateEnergy(bpm: Int?, tremor: TremorLevel?, store: MoodStore): Energy? {
+    val base = bpm?.let { EmotionWords.estimateEnergy(it.toDouble(), store.restingBpm) } ?: return null
+    // 떨림·꼼지락이 평소보다 많으면 에너지를 한 단계 올려 봄
+    return if (tremor == TremorLevel.HIGH) when (base) {
+        Energy.LOW -> Energy.MID
+        else -> Energy.HIGH
+    } else base
+}
+
+fun energyHint(check: CheckState): String {
+    val bpm = check.bpm ?: return "심박을 재지 못했어요. 직접 골라주세요"
+    val parts = mutableListOf("심박 ${bpm}bpm")
+    check.tremorLevel?.let { parts += "떨림 ${it.label}" }
+    val tail = if (check.moved) "\n(움직임이 있어 정확도가 낮을 수 있어요)" else ""
+    return parts.joinToString(" · ") + " → '${check.energy?.label}'으로 추정했어요" + tail
+}
+
+/** Wear OS 6(API 36)부터 쓰이는 새 심박 권한 */
+private const val HR_PERMISSION_NEW = "android.permission.health.READ_HEART_RATE"
+
+/** 가만히 있는 시간이 이만큼 모이면 측정 끝. 계속 움직이면 최대 MAX_MILLIS에서 끝냄 */
+private const val MAX_MILLIS = 30_000L
+
 /**
- * 1단계: 15초 동안 심박 측정.
- * 진행 링과 남은 시간은 심박 값과 상관없이 흘러가고, 값이 안 들어오면 안내 문구를 보여줌.
- * 권한이 없거나 센서가 값을 못 주면 심박 없이 다음 질문으로 넘어감. 언제든 건너뛰기 가능.
+ * 1단계: 심박 + 움직임 측정.
+ * 가만히 있는 시간만 15초 모아서 계산하고, 움직이는 동안은 "잠시 가만히" 안내를 띄움.
+ * 진행 링은 가만히 있는 시간 기준, 최대 30초 뒤엔 무조건 다음으로.
  */
 @Composable
-fun MeasureScreen(store: MoodStore, onDone: (Int?) -> Unit) {
+fun MeasureScreen(store: MoodStore, onDone: (Measurement) -> Unit) {
     val context = LocalContext.current
     fun hasPermission() = listOf(Manifest.permission.BODY_SENSORS, HR_PERMISSION_NEW).any {
         ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
@@ -187,12 +220,22 @@ fun MeasureScreen(store: MoodStore, onDone: (Int?) -> Unit) {
         permState = if (res.values.any { it } || hasPermission()) 1 else -1
     }
     var current by remember { mutableStateOf<Int?>(null) }
-    var elapsed by remember { mutableLongStateOf(0L) }
+    var stillMs by remember { mutableLongStateOf(0L) }
+    var totalMs by remember { mutableLongStateOf(0L) }
+    var moving by remember { mutableStateOf(false) }
+    var movedAny by remember { mutableStateOf(false) }
     var finished by remember { mutableStateOf(false) }
-    val samples = remember { mutableListOf<Double>() }
+    val hrSamples = remember { mutableListOf<Double>() }
+    val tremorSamples = remember { mutableListOf<Double>() }
 
-    fun finish(bpm: Int?) {
-        if (!finished) { finished = true; onDone(bpm) }
+    fun result(): Measurement {
+        // 측정 초반은 불안정하니 뒤쪽 절반만 평균
+        val bpm = hrSamples.drop(hrSamples.size / 2).takeIf { it.isNotEmpty() }?.average()?.roundToInt()
+        val tremor = tremorSamples.takeIf { it.size >= 4 }?.sorted()?.let { it[it.size / 2] } // 중앙값
+        return Measurement(bpm, tremor, movedAny)
+    }
+    fun finish(m: Measurement) {
+        if (!finished) { finished = true; onDone(m) }
     }
 
     LaunchedEffect(Unit) {
@@ -200,48 +243,59 @@ fun MeasureScreen(store: MoodStore, onDone: (Int?) -> Unit) {
     }
 
     LaunchedEffect(permState) {
-        when (permState) {
-            -1 -> { delay(1500); finish(null) }
-            1 -> {
-                val start = System.currentTimeMillis()
-                coroutineScope {
-                    // 심박은 따로 받고, 시간은 그와 상관없이 흘러감
-                    val reader = launch {
-                        runCatching {
-                            heartRateFlow(context).collect { bpm ->
-                                samples += bpm
-                                current = bpm.roundToInt()
-                            }
-                        }
-                    }
-                    while (elapsed < MEASURE_MILLIS) {
-                        delay(200)
-                        elapsed = System.currentTimeMillis() - start
-                    }
-                    reader.cancel()
-                }
-                // 측정 초반은 불안정하니 뒤쪽 절반만 평균
-                val avg = samples.drop(samples.size / 2).takeIf { it.isNotEmpty() }?.average()
-                finish(avg?.roundToInt())
-            }
+        if (permState == -1) {
+            delay(1500); finish(Measurement(null, null, false)); return@LaunchedEffect
         }
+        if (permState != 1) return@LaunchedEffect
+        coroutineScope {
+            // 움직임은 계속 감시: 가만히 있을 때만 떨림을 모음
+            val motion = launch {
+                runCatching {
+                    motionFlow(context).collect { m ->
+                        moving = m.isMoving
+                        if (m.isMoving) movedAny = true else tremorSamples += m.tremor
+                    }
+                }
+            }
+            // 심박: 움직이는 동안 들어온 값은 버림
+            val heart = launch {
+                runCatching {
+                    heartRateFlow(context).collect { bpm ->
+                        current = bpm.roundToInt()
+                        if (!moving) hrSamples += bpm
+                    }
+                }
+            }
+            var last = System.currentTimeMillis()
+            while (stillMs < MEASURE_MILLIS && totalMs < MAX_MILLIS) {
+                delay(200)
+                val now = System.currentTimeMillis()
+                val dt = now - last
+                last = now
+                totalMs += dt
+                if (!moving) stillMs += dt
+            }
+            motion.cancel(); heart.cancel()
+        }
+        finish(result())
     }
 
-    val secondsLeft = ((MEASURE_MILLIS - elapsed).coerceAtLeast(0) + 999) / 1000
+    val secondsLeft = ((MEASURE_MILLIS - stillMs).coerceAtLeast(0) + 999) / 1000
     val status = when {
         permState == 0 -> "심박 권한을 허용해 주세요"
         permState == -1 -> "권한이 없어 직접 고를게요"
+        moving -> "잠시 가만히 있어 주세요"
         current != null -> "편하게 숨 쉬세요"
-        elapsed > 4000 -> "심박을 찾는 중이에요\n워치를 손목에 꼭 맞게 차주세요"
+        totalMs > 4000 -> "심박을 찾는 중이에요\n워치를 손목에 꼭 맞게 차주세요"
         else -> "센서 준비 중…"
     }
 
     Scaffold(timeText = { TimeText() }) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             CircularProgressIndicator(
-                progress = (elapsed / MEASURE_MILLIS.toFloat()).coerceIn(0f, 1f),
+                progress = (stillMs / MEASURE_MILLIS.toFloat()).coerceIn(0f, 1f),
                 modifier = Modifier.fillMaxSize().padding(4.dp),
-                indicatorColor = Color(0xFFFF6B8A),
+                indicatorColor = if (moving) Color(0xFFFFB74D) else Color(0xFFFF6B8A),
                 strokeWidth = 5.dp
             )
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -250,14 +304,17 @@ fun MeasureScreen(store: MoodStore, onDone: (Int?) -> Unit) {
                     Text(current?.let { "$it" } ?: "--", fontSize = 32.sp, fontWeight = FontWeight.Bold)
                     Text(" bpm", fontSize = 12.sp, color = Color.Gray, modifier = Modifier.padding(bottom = 6.dp))
                 }
-                Text(status, fontSize = 12.sp, textAlign = TextAlign.Center)
+                Text(
+                    status, fontSize = 12.sp, textAlign = TextAlign.Center,
+                    color = if (moving) Color(0xFFFFB74D) else Color.Unspecified
+                )
                 Text(
                     if (permState == 1) "${secondsLeft}초 · 평소 ${store.restingBpm.roundToInt()}bpm" else "",
                     fontSize = 10.sp, color = Color.Gray
                 )
                 Spacer(Modifier.height(6.dp))
                 CompactChip(
-                    onClick = { finish(current) },
+                    onClick = { finish(result()) },
                     label = { Text("건너뛰기") },
                     colors = ChipDefaults.secondaryChipColors(),
                 )
@@ -271,8 +328,7 @@ fun MeasureScreen(store: MoodStore, onDone: (Int?) -> Unit) {
 fun EnergyQuestion(check: CheckState, onNext: () -> Unit) {
     QuestionScreen(
         title = "몸의 에너지는 어떤가요?",
-        hint = check.bpm?.let { "심박 ${it}bpm → '${check.energy?.label}'으로 추정했어요" }
-            ?: "심박을 재지 못했어요. 직접 골라주세요",
+        hint = energyHint(check),
         options = Energy.entries.map { it to it.label },
         selected = check.energy,
     ) { check.energy = it; onNext() }
