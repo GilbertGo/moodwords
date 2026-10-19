@@ -19,6 +19,17 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.clickable
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.focusable
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.rotary.onRotaryScrollEvent
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.pager.VerticalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -515,7 +526,14 @@ fun <T> QuestionScreen(
 
 private const val FIRST_SHOWN = 8
 
-/** 5단계: 감정 단어 + 뜻. 원인에 맞는 후보 8개를 먼저, "더 보기"로 같은 칸 전체 */
+/** 한 장씩 넘겨 보는 결과 화면의 장 */
+private enum class Page { WORD, POEM, MEANING, QUOTE, SAVE }
+
+/**
+ * 5단계: 결과. 한 화면에 하나씩 — 단어 → 감성 문장 → 뜻 → 글귀 → 기록.
+ * 위로 밀거나 화면을 눌러 다음 장으로. 다른 단어는 마지막 장에서.
+ */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ResultScreen(check: CheckState, onSave: (String) -> Unit) {
     val context = LocalContext.current
@@ -525,67 +543,194 @@ fun ResultScreen(check: CheckState, onSave: (String) -> Unit) {
     val words = remember(energy, valence, cause) { EmotionWords.find(context, energy, valence, cause) }
     if (words.isEmpty()) return
     var chosen by remember(words) { mutableStateOf(words.first()) }
-    var showAll by remember(words) { mutableStateOf(false) }
+    var picking by remember { mutableStateOf(false) }
     val color = Color(EmotionWords.argbOf(valence))
-    val others = words.filter { it != chosen }
-    val shown = if (showAll) others else others.take(FIRST_SHOWN)
     val quotes = remember(chosen) { Quotes.forWord(context, chosen) }
     var quoteIdx by remember(chosen) { mutableIntStateOf(0) }
-    // 긴 표현도 한 화면에 들어가게 글자 크기 조절
-    val wordSize = when {
-        chosen.word.length <= 4 -> 32.sp
-        chosen.word.length <= 7 -> 24.sp
-        else -> 18.sp
+    val pages = remember(chosen, quotes) {
+        Page.entries.filter {
+            when (it) {
+                Page.POEM -> chosen.poem.isNotBlank()
+                Page.QUOTE -> quotes.isNotEmpty()
+                else -> true
+            }
+        }
+    }
+    val pager = rememberPagerState { pages.size }
+    val scope = rememberCoroutineScope()
+    fun next() { scope.launch { if (pager.currentPage < pages.lastIndex) pager.animateScrollToPage(pager.currentPage + 1) } }
+
+    BackHandler(enabled = picking) { picking = false }
+    // 크라운·베젤 돌리기로도 넘기기
+    val focus = remember { FocusRequester() }
+    var rotary by remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(picking) { if (!picking) runCatching { focus.requestFocus() } }
+
+    if (picking) {
+        OtherWords(words.filter { it != chosen }, color) { w ->
+            chosen = w; picking = false
+            scope.launch { pager.scrollToPage(0) }
+        }
+        return
     }
 
-    Scaffold(timeText = { TimeText() }) {
-        ScalingLazyColumn(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
-            item { Text("지금 마음은", fontSize = 12.sp, color = Color.Gray) }
-            item {
-                Text(
-                    chosen.word, fontSize = wordSize, fontWeight = FontWeight.Bold,
-                    color = color, textAlign = TextAlign.Center
-                )
-            }
-            if (chosen.poem.isNotBlank()) item {
-                Text(
-                    chosen.poem, textAlign = TextAlign.Center, fontSize = 14.sp,
-                    fontStyle = FontStyle.Italic, color = color.copy(alpha = 0.9f)
-                )
-            }
-            item { Text(chosen.meaning, textAlign = TextAlign.Center, fontSize = 12.sp, color = Color(0xFFBBBBBB)) }
-            quotes.getOrNull(quoteIdx % quotes.size.coerceAtLeast(1))?.let { q ->
-                item {
-                    Column(
-                        Modifier.fillMaxWidth().clickable { quoteIdx++ }.padding(vertical = 6.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text("“${q.text}”", textAlign = TextAlign.Center, fontSize = 12.sp, fontStyle = FontStyle.Italic)
-                        Text("— ${q.source}", textAlign = TextAlign.Center, fontSize = 9.sp, color = Color.Gray)
-                        if (quotes.size > 1) Text("눌러서 다른 글귀", fontSize = 9.sp, color = Color.DarkGray)
+    Box(
+        Modifier.fillMaxSize().background(Color.Black)
+            .background(Brush.radialGradient(listOf(color.copy(alpha = 0.28f), Color.Transparent)))
+    ) {
+        VerticalPager(
+            state = pager,
+            modifier = Modifier.fillMaxSize()
+                .onRotaryScrollEvent { e ->
+                    rotary += e.verticalScrollPixels
+                    if (kotlin.math.abs(rotary) > 60f && !pager.isScrollInProgress) {
+                        val target = (pager.currentPage + if (rotary > 0) 1 else -1).coerceIn(0, pages.lastIndex)
+                        rotary = 0f
+                        scope.launch { pager.animateScrollToPage(target) }
                     }
+                    true
+                }
+                .focusRequester(focus).focusable(),
+        ) { i ->
+            Box(
+                Modifier.fillMaxSize()
+                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
+                        if (pages[i] == Page.QUOTE && quotes.size > 1) quoteIdx++ else next()
+                    }
+                    .padding(horizontal = 26.dp, vertical = 30.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                when (pages[i]) {
+                    Page.WORD -> WordPage(chosen, color, energy, valence)
+                    Page.POEM -> PoemPage(chosen.poem, color)
+                    Page.MEANING -> MeaningPage(chosen, color)
+                    Page.QUOTE -> QuotePage(quotes[quoteIdx % quotes.size], color, quotes.size > 1)
+                    Page.SAVE -> SavePage(chosen, color, onSave = { onSave(chosen.word) }, onOther = { picking = true })
                 }
             }
-            item {
-                val r = chosen.research
-                Text(
-                    when (chosen.basis) {
-                        Basis.RESEARCH -> "근거 ${Research.SHORT}\n쾌 %.1f · 각성 %.1f /7".format(r!!.pleasure, r.activation)
-                        Basis.RESEARCH_EXCEPTION -> "연구 단어 · 뜻 기준 배치"
-                        Basis.AI -> "AI 분류 · 연구 근거 없음"
-                    },
-                    textAlign = TextAlign.Center, fontSize = 10.sp, color = Color.Gray
+        }
+        // 오른쪽 가장자리 점: 지금 몇 번째 장인지
+        Column(
+            Modifier.align(Alignment.CenterEnd).padding(end = 6.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp),
+        ) {
+            pages.indices.forEach { i ->
+                val on = i == pager.currentPage
+                Box(
+                    Modifier.size(if (on) 6.dp else 4.dp).clip(RoundedCornerShape(3.dp))
+                        .background(if (on) color else Color.White.copy(alpha = 0.3f))
                 )
             }
-            item {
-                Button(
-                    onClick = { onSave(chosen.word) },
-                    colors = ButtonDefaults.buttonColors(backgroundColor = color),
-                ) { Text("기록", color = Color.Black) }
-            }
-            item { Text("다른 단어가 더 맞나요?", fontSize = 11.sp, color = Color.Gray) }
+        }
+    }
+}
+
+@Composable
+private fun WordPage(w: EmotionWord, color: Color, energy: Energy, valence: Valence) {
+    val size = when {
+        w.word.length <= 3 -> 38.sp
+        w.word.length <= 5 -> 32.sp
+        w.word.length <= 7 -> 24.sp
+        else -> 19.sp
+    }
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text("지금 마음은", fontSize = 12.sp, color = Color.White.copy(alpha = 0.5f), letterSpacing = 2.sp)
+        Spacer(Modifier.height(10.dp))
+        Text(w.word, fontSize = size, fontWeight = FontWeight.Bold, color = color, textAlign = TextAlign.Center, lineHeight = size * 1.2f)
+        Spacer(Modifier.height(12.dp))
+        Box(Modifier.width(24.dp).height(1.dp).background(color.copy(alpha = 0.6f)))
+        Spacer(Modifier.height(12.dp))
+        Text("에너지 ${energy.label} · ${valence.label}", fontSize = 11.sp, color = Color.White.copy(alpha = 0.45f))
+        Spacer(Modifier.height(14.dp))
+        Text("⌄", fontSize = 14.sp, color = Color.White.copy(alpha = 0.35f))
+    }
+}
+
+@Composable
+private fun PoemPage(poem: String, color: Color) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text("“", fontSize = 28.sp, color = color.copy(alpha = 0.7f), fontFamily = FontFamily.Serif, lineHeight = 22.sp)
+        Text(
+            poem, fontSize = if (poem.length <= 24) 18.sp else 16.sp, lineHeight = 27.sp,
+            fontFamily = FontFamily.Serif, fontStyle = FontStyle.Italic,
+            color = Color(0xFFF3EEE6), textAlign = TextAlign.Center,
+        )
+    }
+}
+
+@Composable
+private fun MeaningPage(w: EmotionWord, color: Color) {
+    val r = w.research
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(w.word, fontSize = 13.sp, color = color, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(10.dp))
+        Text(w.meaning, fontSize = 15.sp, lineHeight = 23.sp, color = Color(0xFFE6E1DA), textAlign = TextAlign.Center)
+        Spacer(Modifier.height(14.dp))
+        Text(
+            when (w.basis) {
+                Basis.RESEARCH -> "근거 ${Research.SHORT}\n쾌 %.1f · 각성 %.1f /7".format(r!!.pleasure, r.activation)
+                Basis.RESEARCH_EXCEPTION -> "연구 단어 · 뜻 기준 배치"
+                Basis.AI -> "AI 분류 · 연구 근거 없음"
+            },
+            fontSize = 10.sp, lineHeight = 14.sp, color = Color.White.copy(alpha = 0.4f), textAlign = TextAlign.Center
+        )
+    }
+}
+
+@Composable
+private fun QuotePage(q: Quote, color: Color, more: Boolean) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(
+            q.text, fontSize = if (q.text.length <= 30) 15.sp else 13.sp, lineHeight = 21.sp,
+            fontFamily = FontFamily.Serif, color = Color(0xFFF3EEE6), textAlign = TextAlign.Center,
+        )
+        Spacer(Modifier.height(10.dp))
+        Text("— ${q.source}", fontSize = 10.sp, lineHeight = 13.sp, color = color.copy(alpha = 0.8f), textAlign = TextAlign.Center)
+        if (more) {
+            Spacer(Modifier.height(8.dp))
+            Text("눌러서 다른 글귀", fontSize = 9.sp, color = Color.White.copy(alpha = 0.3f))
+        }
+    }
+}
+
+@Composable
+private fun SavePage(w: EmotionWord, color: Color, onSave: () -> Unit, onOther: () -> Unit) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(w.word, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = color, textAlign = TextAlign.Center)
+        Spacer(Modifier.height(4.dp))
+        Text("이 마음을 남길까요?", fontSize = 12.sp, color = Color.White.copy(alpha = 0.6f))
+        Spacer(Modifier.height(14.dp))
+        Chip(
+            onClick = onSave,
+            label = { Text("기록하기", color = Color.Black, fontWeight = FontWeight.Bold) },
+            colors = ChipDefaults.chipColors(backgroundColor = color),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(8.dp))
+        CompactChip(
+            onClick = onOther,
+            label = { Text("다른 단어 보기") },
+            colors = ChipDefaults.secondaryChipColors(),
+        )
+    }
+}
+
+/** 같은 칸의 다른 단어 고르기 */
+@Composable
+private fun OtherWords(others: List<EmotionWord>, color: Color, onPick: (EmotionWord) -> Unit) {
+    var showAll by remember { mutableStateOf(false) }
+    val shown = if (showAll) others else others.take(FIRST_SHOWN)
+    Scaffold(timeText = { TimeText() }) {
+        ScalingLazyColumn(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
+            item { Text("더 가까운 말이 있나요?", fontSize = 12.sp, color = Color.White.copy(alpha = 0.6f)) }
             items(shown) { w ->
-                CompactChip(onClick = { chosen = w }, label = { Text(w.word) })
+                Chip(
+                    onClick = { onPick(w) },
+                    label = { Text(w.word, color = color, fontWeight = FontWeight.Bold) },
+                    secondaryLabel = { Text(w.meaning, maxLines = 1) },
+                    colors = ChipDefaults.secondaryChipColors(),
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
             if (!showAll && others.size > FIRST_SHOWN) item {
                 CompactChip(
