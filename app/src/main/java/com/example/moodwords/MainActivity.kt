@@ -24,6 +24,7 @@ import androidx.wear.compose.material.*
 import androidx.wear.compose.navigation.SwipeDismissableNavHost
 import androidx.wear.compose.navigation.composable
 import androidx.wear.compose.navigation.rememberSwipeDismissableNavController
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -90,8 +91,44 @@ fun MoodWordsApp() {
 
 @Composable
 fun HomeScreen(onStart: () -> Unit, onHistory: () -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var update by remember { mutableStateOf<Updater.Release?>(null) }
+    var progress by remember { mutableStateOf<Float?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    // 앱을 열 때마다 GitHub에 새 버전이 있는지 확인
+    LaunchedEffect(Unit) { update = Updater.checkNewer() }
+
     Scaffold(timeText = { TimeText() }) {
         ScalingLazyColumn(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
+            update?.let { rel ->
+                item {
+                    Chip(
+                        onClick = {
+                            if (progress != null) return@Chip
+                            progress = 0f
+                            error = null
+                            scope.launch {
+                                runCatching { Updater.install(context, rel) { progress = it } }
+                                    .onFailure { error = "다운로드 실패, 다시 눌러주세요" }
+                                progress = null
+                            }
+                        },
+                        label = {
+                            Text(
+                                when {
+                                    progress != null -> "받는 중 ${((progress ?: 0f) * 100).roundToInt()}%"
+                                    else -> "새 버전 설치 (v1.${rel.version})"
+                                }
+                            )
+                        },
+                        secondaryLabel = error?.let { { Text(it) } },
+                        colors = ChipDefaults.chipColors(backgroundColor = Color(0xFF2E7D5B)),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
             item { Text("지금 어떤 마음인가요?", textAlign = TextAlign.Center, fontSize = 16.sp) }
             item {
                 Chip(
@@ -109,6 +146,7 @@ fun HomeScreen(onStart: () -> Unit, onHistory: () -> Unit) {
                     modifier = Modifier.fillMaxWidth()
                 )
             }
+            item { Text("v${BuildConfig.VERSION_NAME}", fontSize = 10.sp, color = Color.Gray) }
         }
     }
 }
