@@ -26,7 +26,7 @@ jobs:
           chmod +x gradlew
           set -o pipefail
           ./gradlew assembleDebug --no-daemon 2>&1 | tee build.log || {
-            grep -E "^e: |What went wrong|Could not|error:|> " build.log | head -25 | while IFS= read -r l; do echo "::error::$l"; done
+            grep -E -A3 "^e: |What went wrong" build.log | grep -v "^> Task" | grep -v "^--$" | head -9 | while IFS= read -r l; do echo "::error::$l"; done
             exit 1
           }
 
