@@ -145,7 +145,13 @@ class CheckState {
     var energy by mutableStateOf<Energy?>(null)
     var valence by mutableStateOf<Valence?>(null)
     var cause by mutableStateOf<Cause?>(null)
-    fun reset() { bpm = null; tremor = null; tremorLevel = null; moved = false; energy = null; valence = null; cause = null }
+    var spoken by mutableStateOf<String?>(null)            // 내 말로 말한 문장
+    var voiceHits by mutableStateOf<List<EmotionWord>>(emptyList())
+    var voiceLevel by mutableStateOf<VoiceLevel?>(null)    // 제시 문장 읽기 결과
+    fun reset() {
+        bpm = null; tremor = null; tremorLevel = null; moved = false; energy = null; valence = null; cause = null
+        spoken = null; voiceHits = emptyList(); voiceLevel = null
+    }
 }
 
 @Composable
@@ -172,8 +178,11 @@ fun MoodWordsApp() {
                     check.moved = m.moved
                     check.tremorLevel = m.tremor?.let { tremorLevel(it, store.restingTremor) }
                     check.energy = estimateEnergy(m.bpm, check.tremorLevel, store)
-                    nav.navigate("energy") { popUpTo("home") }
+                    nav.navigate("voice") { popUpTo("home") }
                 }
+            }
+            composable("voice") {
+                VoiceScreen(check) { nav.navigate("energy") }
             }
             composable("energy") {
                 EnergyQuestion(check) { nav.navigate("valence") }
@@ -331,11 +340,12 @@ fun estimateEnergy(bpm: Int?, tremor: TremorLevel?, store: MoodStore): Energy? {
 }
 
 fun energyHint(check: CheckState): String {
-    val bpm = check.bpm ?: return "심박을 재지 못했어요. 직접 골라주세요"
+    val voice = check.voiceLevel?.let { "\n목소리: ${it.label}" } ?: ""
+    val bpm = check.bpm ?: return (if (check.voiceLevel != null) "목소리로 '${check.energy?.label}' 추정" + voice else "심박을 재지 못했어요. 직접 골라주세요")
     val parts = mutableListOf("심박 ${bpm}bpm")
     check.tremorLevel?.let { parts += "떨림 ${it.label}" }
     val tail = if (check.moved) "\n(움직임이 있어 정확도가 낮을 수 있어요)" else ""
-    return parts.joinToString(" · ") + " → '${check.energy?.label}'으로 추정했어요" + tail
+    return parts.joinToString(" · ") + " → '${check.energy?.label}'으로 추정했어요" + voice + tail
 }
 
 /** Wear OS 6(API 36)부터 쓰이는 새 심박 권한 */
@@ -480,7 +490,7 @@ fun EnergyQuestion(check: CheckState, onNext: () -> Unit) {
 fun ValenceQuestion(check: CheckState, onNext: () -> Unit) {
     QuestionScreen(
         title = "기분은 어느 쪽에 가까워요?",
-        hint = null,
+        hint = check.voiceHits.firstOrNull()?.let { "말한 '${it.word}' → '${it.valence.label}'으로 골라 뒀어요" },
         options = Valence.entries.map { it to it.label },
         selected = check.valence,
     ) { check.valence = it; onNext() }
@@ -540,9 +550,16 @@ fun ResultScreen(check: CheckState, onSave: (String) -> Unit) {
     val energy = check.energy ?: return
     val valence = check.valence ?: return
     val cause = check.cause ?: Cause.ANY
-    val words = remember(energy, valence, cause) { EmotionWords.find(context, energy, valence, cause) }
-    if (words.isEmpty()) return
-    var chosen by remember(words) { mutableStateOf(EmotionWords.pickFirst(context, words, energy, valence, cause)) }
+    val found = remember(energy, valence, cause) { EmotionWords.find(context, energy, valence, cause) }
+    if (found.isEmpty()) return
+    // 내가 말한 단어를 맨 앞에
+    val words = remember(found, check.voiceHits) { check.voiceHits + found.filter { it !in check.voiceHits } }
+    var chosen by remember(words) {
+        mutableStateOf(
+            check.voiceHits.firstOrNull { it.energy == energy && it.valence == valence }
+                ?: EmotionWords.pickFirst(context, found, energy, valence, cause)
+        )
+    }
     var picking by remember { mutableStateOf(false) }
     val color = Color(EmotionWords.argbOf(valence))
     val quotes = remember(chosen) { Quotes.forWord(context, chosen) }
@@ -834,6 +851,141 @@ fun WeekScreen(store: MoodStore) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     CompactChip(onClick = { weeksAgo++ }, label = { Text("‹ 이전") }, colors = ChipDefaults.secondaryChipColors())
                     if (weeksAgo > 0) CompactChip(onClick = { weeksAgo-- }, label = { Text("다음 ›") }, colors = ChipDefaults.secondaryChipColors())
+                }
+            }
+        }
+    }
+}
+
+
+// ── 목소리 ───────────────────────────────────────────────
+/**
+ * 목소리로 듣기 (선택). 두 가지:
+ *  · 제시 문장 읽기: 매번 같은 문장이라 평소 목소리와 비교 → 몸의 에너지 추정을 거듦
+ *  · 내 말로 말하기: 말 속의 감정 단어를 찾아 후보 맨 앞에
+ */
+@Composable
+fun VoiceScreen(check: CheckState, onNext: () -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val baseline = remember { VoiceBaseline(context) }
+    val sensorEnergy = remember { check.energy }   // 여러 번 읽어도 한 번만 반영
+    // idle → reading(문장 보여줌) → recording → idle
+    var mode by remember { mutableStateOf("idle") }
+    var level by remember { mutableFloatStateOf(0f) }
+    var note by remember { mutableStateOf<String?>(null) }
+    val stop = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
+
+    fun startRecording() {
+        mode = "recording"; stop.set(false); note = null
+        scope.launch {
+            val f = VoiceTone.record(stop) { level = it }
+            mode = "idle"
+            if (f == null) { note = "목소리를 잘 못 들었어요. 조용한 곳에서 다시 해 보세요"; return@launch }
+            val lv = baseline.level(f)
+            baseline.add(f)
+            if (lv == null) {
+                note = "평소 목소리를 배우는 중이에요 (${baseline.count.coerceAtMost(VoiceBaseline.LEARN)}/${VoiceBaseline.LEARN})"
+            } else {
+                check.voiceLevel = lv
+                check.energy = (sensorEnergy ?: Energy.MID).shiftBy(lv)
+            }
+        }
+    }
+    val micLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+        if (ok) startRecording() else note = "마이크 권한이 없어 읽기를 할 수 없어요"
+    }
+    val speechLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
+        val text = res.data?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
+        if (text != null) {
+            check.spoken = text
+            check.voiceHits = VoiceWords.match(context, text)
+            check.voiceHits.firstOrNull()?.let { if (check.valence == null) check.valence = it.valence }
+        }
+    }
+
+    Scaffold(timeText = { TimeText() }) {
+        ScalingLazyColumn(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
+            when (mode) {
+                "reading", "recording" -> {
+                    item { Text("이 문장을 소리 내어 읽어 주세요", fontSize = 11.sp, color = Color.Gray, textAlign = TextAlign.Center) }
+                    item {
+                        Text(
+                            VoiceTone.SENTENCE, fontSize = 16.sp, lineHeight = 23.sp, fontFamily = FontFamily.Serif,
+                            color = Color(0xFFF3EEE6), textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(vertical = 6.dp)
+                        )
+                    }
+                    if (mode == "recording") {
+                        item {
+                            Box(Modifier.fillMaxWidth(0.7f).height(6.dp).clip(RoundedCornerShape(3.dp)).background(Color.DarkGray)) {
+                                Box(Modifier.fillMaxHeight().fillMaxWidth(level.coerceAtLeast(0.03f)).background(Color(0xFFB9AEFF)))
+                            }
+                        }
+                        item {
+                            Chip(onClick = { stop.set(true) }, label = { Text("다 읽었어요") },
+                                colors = ChipDefaults.secondaryChipColors(), modifier = Modifier.fillMaxWidth())
+                        }
+                    } else item {
+                        Chip(
+                            onClick = {
+                                if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) startRecording()
+                                else micLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                            },
+                            label = { Text("🎙 읽기 시작", fontWeight = FontWeight.Bold) },
+                            colors = ChipDefaults.primaryChipColors(), modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                    item { Text("평소 내 목소리와 비교하려고, 매번 같은 문장을 읽어요", fontSize = 10.sp, color = Color.Gray, textAlign = TextAlign.Center) }
+                }
+                else -> {
+                    item { Text("목소리로도 들어 볼까요?", fontWeight = FontWeight.Bold, textAlign = TextAlign.Center) }
+                    item {
+                        Text(
+                            "문장을 읽으면 평소 목소리와 비교해 몸의 에너지를 가늠하고, 내 말로 말하면 그 말 속 감정 단어를 찾아요",
+                            fontSize = 11.sp, color = Color.Gray, textAlign = TextAlign.Center
+                        )
+                    }
+                    check.voiceLevel?.let { lv -> item { Text("목소리: ${lv.label}", fontSize = 12.sp, color = Color(0xFFB9AEFF)) } }
+                    note?.let { n -> item { Text(n, fontSize = 11.sp, color = Color(0xFFB9AEFF), textAlign = TextAlign.Center) } }
+                    check.spoken?.let { sp ->
+                        item { Text("“$sp”", fontSize = 12.sp, fontStyle = FontStyle.Italic, textAlign = TextAlign.Center) }
+                        item {
+                            Text(
+                                if (check.voiceHits.isEmpty()) "찾은 감정 단어가 없어요. 질문으로 찾아볼게요"
+                                else "찾은 단어: " + check.voiceHits.take(4).joinToString(", ") { it.word },
+                                fontSize = 11.sp, color = Color(0xFFB9AEFF), textAlign = TextAlign.Center
+                            )
+                        }
+                    }
+                    item {
+                        Chip(onClick = { mode = "reading" }, label = { Text("문장 읽기") },
+                            secondaryLabel = { Text("목소리 톤 → 에너지") },
+                            colors = ChipDefaults.secondaryChipColors(), modifier = Modifier.fillMaxWidth())
+                    }
+                    item {
+                        Chip(
+                            onClick = {
+                                val intent = android.content.Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                                    putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL, android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                                    putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, "ko-KR")
+                                    putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, "지금 기분을 한마디로")
+                                }
+                                runCatching { speechLauncher.launch(intent) }
+                                    .onFailure { note = "이 기기에서는 받아쓰기를 쓸 수 없어요" }
+                            },
+                            label = { Text("내 말로 말하기") },
+                            secondaryLabel = { Text("말한 내용 → 단어") },
+                            colors = ChipDefaults.secondaryChipColors(), modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                    item {
+                        val done = check.voiceLevel != null || check.spoken != null
+                        Chip(onClick = onNext, label = { Text(if (done) "다음" else "건너뛰기", fontWeight = FontWeight.Bold) },
+                            colors = if (done) ChipDefaults.primaryChipColors() else ChipDefaults.secondaryChipColors(),
+                            modifier = Modifier.fillMaxWidth())
+                    }
+                    item { Text("녹음은 저장하지 않아요. 받아쓰기는 기기의 음성 인식을 써요", fontSize = 9.sp, color = Color.DarkGray, textAlign = TextAlign.Center) }
                 }
             }
         }

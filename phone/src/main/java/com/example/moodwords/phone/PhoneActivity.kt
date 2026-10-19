@@ -1,6 +1,13 @@
 package com.example.moodwords.phone
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.speech.RecognizerIntent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
+import java.util.concurrent.atomic.AtomicBoolean
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -67,13 +74,16 @@ private val scheme = lightColorScheme(
 )
 
 // ── 화면 상태 ─────────────────────────────────────────────
-private enum class Screen { HOME, ENERGY, VALENCE, CAUSE, RESULT, HISTORY, ABOUT, WEEK, GUIDE, RATE }
+private enum class Screen { HOME, VOICE, ENERGY, VALENCE, CAUSE, RESULT, HISTORY, ABOUT, WEEK, GUIDE, RATE }
 
 private class Check {
     var energy by mutableStateOf<Energy?>(null)
     var valence by mutableStateOf<Valence?>(null)
     var cause by mutableStateOf<Cause?>(null)
-    fun reset() { energy = null; valence = null; cause = null }
+    var spoken by mutableStateOf<String?>(null)
+    var voiceHits by mutableStateOf<List<EmotionWord>>(emptyList())
+    var voiceLevel by mutableStateOf<VoiceLevel?>(null)
+    fun reset() { energy = null; valence = null; cause = null; spoken = null; voiceHits = emptyList(); voiceLevel = null }
 }
 
 @Composable
@@ -87,6 +97,7 @@ fun PhoneApp() {
     // 뒤로가기: 질문은 한 단계씩, 나머지는 홈으로
     BackHandler(enabled = screen != Screen.HOME) {
         screen = when (screen) {
+            Screen.ENERGY -> Screen.VOICE
             Screen.VALENCE -> Screen.ENERGY
             Screen.CAUSE -> Screen.VALENCE
             Screen.RESULT -> Screen.CAUSE
@@ -99,17 +110,19 @@ fun PhoneApp() {
             Box(Modifier.fillMaxSize().systemBarsPadding()) {
                 when (screen) {
                     Screen.HOME -> HomeScreen(
-                        onStart = { check.reset(); screen = Screen.ENERGY },
+                        onStart = { check.reset(); screen = Screen.VOICE },
                         onHistory = { screen = Screen.HISTORY },
                         onAbout = { screen = Screen.ABOUT },
                         onWeek = { screen = Screen.WEEK },
                         onGuide = { screen = Screen.GUIDE },
                         onRate = { screen = Screen.RATE },
                     )
+                    Screen.VOICE -> VoiceScreen(check, onNext = { screen = Screen.ENERGY })
                     Screen.ENERGY -> Question(
                         step = 1,
                         title = "지금 몸의 에너지는 어떤가요?",
-                        hint = "워치 버전은 심박으로 재지만, 여기서는 느낌으로 골라주세요.",
+                        hint = check.voiceLevel?.let { "목소리가 ${it.label} → '${check.energy?.label}'으로 골라 뒀어요. 느낌과 다르면 바꿔 주세요." }
+                            ?: "워치 버전은 심박으로 재지만, 여기서는 느낌으로 골라주세요.",
                         options = listOf(
                             Triple(Energy.HIGH, "높음", "들뜨거나 긴장돼서 심장이 빨리 뛰어요"),
                             Triple(Energy.MID, "보통", "평소처럼 깨어 있어요"),
@@ -120,7 +133,7 @@ fun PhoneApp() {
                     Screen.VALENCE -> Question(
                         step = 2,
                         title = "기분은 어느 쪽에 가까워요?",
-                        hint = null,
+                        hint = check.voiceHits.firstOrNull()?.let { "말한 '${it.word}' → '${it.valence.label}'으로 골라 뒀어요." },
                         options = listOf(
                             Triple(Valence.GOOD, "좋은 쪽", "편하거나 즐겁거나 기대돼요"),
                             Triple(Valence.NEUTRAL, "그저 그럼", "좋지도 나쁘지도 않거나 섞여 있어요"),
@@ -141,7 +154,7 @@ fun PhoneApp() {
                             store.add(MoodEntry(System.currentTimeMillis(), word, null, check.energy!!, check.valence!!, null, check.cause))
                             screen = Screen.HISTORY
                         },
-                        onRestart = { check.reset(); screen = Screen.ENERGY },
+                        onRestart = { check.reset(); screen = Screen.VOICE },
                     )
                     Screen.HISTORY -> HistoryScreen(store, onBack = { screen = Screen.HOME })
                     Screen.ABOUT -> AboutScreen(onBack = { screen = Screen.HOME })
@@ -372,9 +385,16 @@ private fun ResultScreen(check: Check, onSave: (String) -> Unit, onRestart: () -
     val energy = check.energy ?: return
     val valence = check.valence ?: return
     val cause = check.cause ?: Cause.ANY
-    val words = remember(energy, valence, cause) { EmotionWords.find(context, energy, valence, cause) }
-    if (words.isEmpty()) return
-    var chosen by remember(words) { mutableStateOf(EmotionWords.pickFirst(context, words, energy, valence, cause)) }
+    val found = remember(energy, valence, cause) { EmotionWords.find(context, energy, valence, cause) }
+    if (found.isEmpty()) return
+    // 내가 말한 단어를 맨 앞에
+    val words = remember(found, check.voiceHits) { check.voiceHits + found.filter { it !in check.voiceHits } }
+    var chosen by remember(words) {
+        mutableStateOf(
+            check.voiceHits.firstOrNull { it.energy == energy && it.valence == valence }
+                ?: EmotionWords.pickFirst(context, found, energy, valence, cause)
+        )
+    }
     var showAll by remember(words) { mutableStateOf(false) }
     val others = words.filter { it != chosen }
     val shown = if (showAll) others else others.take(FIRST_SHOWN)
@@ -897,4 +917,145 @@ private fun Scale(question: String, low: String, high: String, value: Int, onPic
         Text(high, fontSize = 12.sp, color = Muted)
     }
     Spacer(Modifier.height(20.dp))
+}
+
+
+// ── 목소리 ───────────────────────────────────────────────
+/**
+ * 목소리로 듣기 (선택).
+ *  · 제시 문장 읽기: 매번 같은 문장 → 평소 목소리와 비교해 몸의 에너지를 가늠
+ *  · 내 말로 말하기: 말 속 감정 단어를 찾아 후보 맨 앞에
+ */
+@Composable
+private fun VoiceScreen(check: Check, onNext: () -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val baseline = remember { VoiceBaseline(context) }
+    var recording by remember { mutableStateOf(false) }
+    var level by remember { mutableFloatStateOf(0f) }
+    var note by remember { mutableStateOf<String?>(null) }
+    val stop = remember { AtomicBoolean(false) }
+
+    fun startRecording() {
+        recording = true; stop.set(false); note = null
+        scope.launch {
+            val f = VoiceTone.record(stop) { level = it }
+            recording = false
+            if (f == null) { note = "목소리를 잘 못 들었어요. 조용한 곳에서 다시 해 보세요."; return@launch }
+            val lv = baseline.level(f)
+            baseline.add(f)
+            if (lv == null) {
+                note = "평소 목소리를 배우는 중이에요 (${baseline.count.coerceAtMost(VoiceBaseline.LEARN)}/${VoiceBaseline.LEARN}). " +
+                    "${VoiceBaseline.LEARN}번 읽고 나면 비교할 수 있어요."
+            } else {
+                check.voiceLevel = lv
+                check.energy = Energy.MID.shiftBy(lv)
+            }
+        }
+    }
+    val micLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+        if (ok) startRecording() else note = "마이크 권한이 없어 읽기를 할 수 없어요."
+    }
+    val speechLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
+        val text = res.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
+        if (text != null) {
+            check.spoken = text
+            check.voiceHits = VoiceWords.match(context, text)
+            check.voiceHits.firstOrNull()?.let { if (check.valence == null) check.valence = it.valence }
+        }
+    }
+
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp)) {
+        Spacer(Modifier.height(12.dp))
+        Text("목소리로도 들어 볼까요?", fontSize = 26.sp, fontWeight = FontWeight.Bold, color = Ink, lineHeight = 34.sp)
+        Spacer(Modifier.height(8.dp))
+        Text("하지 않아도 괜찮아요. 질문만으로도 찾을 수 있어요.", fontSize = 14.sp, color = Muted)
+        Spacer(Modifier.height(20.dp))
+
+        // ① 제시 문장 읽기
+        InfoCard(Color.White) {
+            Text("① 문장 읽기 · 목소리 톤", fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = Ink)
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "왜? 마음이 들뜨면 목소리가 높고 빨라지고, 가라앉으면 낮고 느려져요. 매번 같은 문장을 읽으면 평소 내 목소리와 비교해 " +
+                    "몸의 에너지를 가늠할 수 있어요. 목소리로 기분이 좋은지 나쁜지까지는 알 수 없어서, 에너지에만 써요.",
+                fontSize = 14.sp, lineHeight = 21.sp, color = Muted
+            )
+            Spacer(Modifier.height(14.dp))
+            Text(
+                VoiceTone.SENTENCE, fontSize = 20.sp, lineHeight = 30.sp, fontFamily = FontFamily.Serif, color = Ink,
+                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Paper).padding(16.dp)
+            )
+            Spacer(Modifier.height(12.dp))
+            if (recording) {
+                Box(Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)).background(Line)) {
+                    Box(Modifier.fillMaxHeight().fillMaxWidth(level.coerceAtLeast(0.03f)).background(Accent))
+                }
+                Spacer(Modifier.height(10.dp))
+                OutlinedButton(onClick = { stop.set(true) }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)) {
+                    Text("다 읽었어요", color = Ink)
+                }
+            } else {
+                Button(
+                    onClick = {
+                        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) startRecording()
+                        else micLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                    },
+                    modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp),
+                ) { Text(if (check.voiceLevel == null) "🎙 소리 내어 읽기" else "다시 읽기") }
+            }
+            check.voiceLevel?.let {
+                Spacer(Modifier.height(10.dp))
+                Text("목소리가 ${it.label}", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = Accent)
+            }
+            note?.let { Spacer(Modifier.height(8.dp)); Text(it, fontSize = 13.sp, color = Accent, lineHeight = 19.sp) }
+        }
+        Spacer(Modifier.height(14.dp))
+
+        // ② 내 말로 말하기
+        InfoCard(Color.White) {
+            Text("② 내 말로 말하기 · 말한 내용", fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = Ink)
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "왜? 지금 기분을 내 말로 표현해 보는 것 자체가 감정에 이름을 붙이는 첫걸음이에요. " +
+                    "\"좀 서운하고 피곤해\"처럼 말하면, 그 말 속 감정 단어를 찾아 후보 맨 앞에 보여줘요.",
+                fontSize = 14.sp, lineHeight = 21.sp, color = Muted
+            )
+            Spacer(Modifier.height(12.dp))
+            Button(
+                onClick = {
+                    val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                        putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                        putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ko-KR")
+                        putExtra(RecognizerIntent.EXTRA_PROMPT, "지금 기분을 한마디로 말해 주세요")
+                    }
+                    runCatching { speechLauncher.launch(intent) }.onFailure { note = "이 폰에서는 받아쓰기를 쓸 수 없어요." }
+                },
+                modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp),
+            ) { Text(if (check.spoken == null) "🗣 말하기" else "다시 말하기") }
+            check.spoken?.let { sp ->
+                Spacer(Modifier.height(12.dp))
+                Text("“$sp”", fontSize = 17.sp, fontFamily = FontFamily.Serif, fontStyle = FontStyle.Italic, color = Ink)
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    if (check.voiceHits.isEmpty()) "찾은 감정 단어가 없어요. 질문으로 함께 찾아볼게요."
+                    else "찾은 단어: " + check.voiceHits.take(5).joinToString(", ") { it.word },
+                    fontSize = 14.sp, color = Accent
+                )
+            }
+        }
+        Spacer(Modifier.height(20.dp))
+        val done = check.voiceLevel != null || check.spoken != null
+        Button(
+            onClick = onNext,
+            modifier = Modifier.fillMaxWidth().height(56.dp), shape = RoundedCornerShape(16.dp),
+            colors = if (done) ButtonDefaults.buttonColors() else ButtonDefaults.buttonColors(containerColor = Line, contentColor = Ink),
+        ) { Text(if (done) "다음" else "건너뛰고 질문으로", fontSize = 17.sp, fontWeight = FontWeight.SemiBold) }
+        Spacer(Modifier.height(12.dp))
+        Text(
+            "녹음은 저장하지 않아요. 문장 읽기는 이 폰 안에서만 분석하고, 높낮이·크기·빠르기 숫자만 남겨요. " +
+                "'내 말로 말하기'는 폰의 음성 인식(구글·삼성)을 쓰므로 목소리가 그 회사 서버로 갈 수 있어요.",
+            fontSize = 12.sp, lineHeight = 18.sp, color = Muted
+        )
+    }
 }
