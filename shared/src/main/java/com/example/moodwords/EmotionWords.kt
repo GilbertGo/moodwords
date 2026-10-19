@@ -28,7 +28,17 @@ data class EmotionWord(
     val research: Research? = null,
     val poem: String = "",        // 감정을 그려 보이는 한 줄 (앱이 새로 쓴 문장)
     val family: String = "",      // 글귀를 고르는 감정 갈래 (JOY, LONGING …)
-)
+) {
+    /** 연구 점수 그대로 / 연구 단어지만 뜻 기준으로 둠 / 연구에 없어 AI가 분류 */
+    val basis: Basis
+        get() = when (val r = research) {
+            null -> Basis.AI
+            else -> if (Research.cellOf(r) == (energy to valence)) Basis.RESEARCH else Basis.RESEARCH_EXCEPTION
+        }
+}
+
+/** 이 단어의 칸이 어디서 왔는지 */
+enum class Basis { RESEARCH, RESEARCH_EXCEPTION, AI }
 
 /** 연구 근거: 박인조·민경환(2005) 한국어 감정단어 434개 평정 (7점 척도, 쾌–불쾌·활성화 각 대학생 123명) */
 data class Research(

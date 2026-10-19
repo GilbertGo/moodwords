@@ -543,13 +543,16 @@ fun ResultScreen(check: CheckState, onSave: (String) -> Unit) {
                     }
                 }
             }
-            chosen.research?.let { r ->
-                item {
-                    Text(
-                        "근거 ${Research.SHORT}\n쾌 %.1f · 각성 %.1f /7".format(r.pleasure, r.activation),
-                        textAlign = TextAlign.Center, fontSize = 10.sp, color = Color.Gray
-                    )
-                }
+            item {
+                val r = chosen.research
+                Text(
+                    when (chosen.basis) {
+                        Basis.RESEARCH -> "근거 ${Research.SHORT}\n쾌 %.1f · 각성 %.1f /7".format(r!!.pleasure, r.activation)
+                        Basis.RESEARCH_EXCEPTION -> "연구 단어 · 뜻 기준 배치"
+                        Basis.AI -> "AI 분류 · 연구 근거 없음"
+                    },
+                    textAlign = TextAlign.Center, fontSize = 10.sp, color = Color.Gray
+                )
             }
             item {
                 Button(

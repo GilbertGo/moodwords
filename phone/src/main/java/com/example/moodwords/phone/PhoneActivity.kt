@@ -396,13 +396,8 @@ private fun ResultScreen(check: Check, onSave: (String) -> Unit, onRestart: () -
                 "에너지 ${energy.label} · 기분 ${valence.label} · ${cause.label}",
                 fontSize = 13.sp, color = Muted
             )
-            chosen.research?.let { r ->
-                Spacer(Modifier.height(10.dp))
-                Text(
-                    "연구 근거 · ${Research.SHORT} '${r.sourceWord}'\n쾌 %.2f · 각성 %.2f (7점 척도)".format(r.pleasure, r.activation),
-                    fontSize = 12.sp, color = Muted, lineHeight = 17.sp
-                )
-            }
+            Spacer(Modifier.height(10.dp))
+            BasisLabel(chosen)
         }
 
         // 이 감정에 어울리는 글귀 (눌러서 다음 글귀)
@@ -440,11 +435,12 @@ private fun ResultScreen(check: Check, onSave: (String) -> Unit, onRestart: () -
 
         Spacer(Modifier.height(28.dp))
         Text("다른 단어가 더 맞나요?", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = Ink)
+        Text("• 표시는 연구 근거가 있는 단어예요", fontSize = 12.sp, color = Muted)
         Spacer(Modifier.height(10.dp))
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             shown.forEach { w ->
                 Text(
-                    w.word, fontSize = 15.sp, color = Ink,
+                    if (w.basis == Basis.AI) w.word else "• ${w.word}", fontSize = 15.sp, color = Ink,
                     modifier = Modifier.clip(RoundedCornerShape(20.dp)).background(Color.White)
                         .border(1.dp, Line, RoundedCornerShape(20.dp))
                         .clickable { chosen = w }
@@ -518,7 +514,7 @@ private fun AboutScreen(onBack: () -> Unit) {
         )
         Section(
             "한국어 감정 단어 연구",
-            "한국어 감정단어 434개의 쾌–불쾌와 활성화를 대학생 123명씩이 7점 척도로 평정한 연구가 있어요. 앱 단어 ${"%,d".format(total)}개 중 ${"%,d".format(withResearch)}개가 이 연구의 단어이고, 그중 ${"%,d".format(placed)}개는 점수 그대로 칸을 정했어요. 나머지 ${withResearch - placed}개는 친숙성이 낮아 평정이 불안정해서 사전 뜻에 맞춰 두었어요.\n\n${Research.CITATION}\n\n연구에 없는 단어(몸 상태, 일상 표현 등)는 같은 기준으로 앱이 분류한 것이라 연구로 검증되지는 않았어요."
+            "한국어 감정단어 434개의 쾌–불쾌와 활성화를 대학생 123명씩이 7점 척도로 평정한 연구가 있어요. 앱 단어 ${"%,d".format(total)}개 중 ${"%,d".format(withResearch)}개가 이 연구의 단어이고, 그중 ${"%,d".format(placed)}개는 점수 그대로 칸을 정했어요. 나머지 ${withResearch - placed}개는 친숙성이 낮아 평정이 불안정해서 사전 뜻에 맞춰 두었어요.\n\n${Research.CITATION}\n\n연구에 없는 단어 ${"%,d".format(total - withResearch)}개(몸 상태, 일상 표현 등)는 근거가 될 점수가 없어서 AI가 뜻을 보고 같은 기준으로 분류했어요. 연구로 검증된 것이 아니어서, 결과 화면에 'AI 분류'로 표시해요."
         )
         Section(
             "왜 이름을 붙이나요?",
@@ -720,4 +716,17 @@ private fun StackBar(parts: List<Triple<String, Int, Color>>, total: Int) {
             }
         }
     }
+}
+
+
+/** 결과 화면: 이 단어의 칸이 어디서 왔는지 */
+@Composable
+private fun BasisLabel(w: EmotionWord) {
+    val r = w.research
+    val text = when (w.basis) {
+        Basis.RESEARCH -> "연구 근거 · ${Research.SHORT} '${r!!.sourceWord}'\n쾌 %.2f · 각성 %.2f (7점 척도)".format(r.pleasure, r.activation)
+        Basis.RESEARCH_EXCEPTION -> "연구 단어 · ${Research.SHORT} '${r!!.sourceWord}'\n친숙성이 낮아 점수 대신 뜻을 기준으로 두었어요"
+        Basis.AI -> "AI 분류 · 연구에 없는 단어라 AI가 뜻을 보고 칸을 정했어요"
+    }
+    Text(text, fontSize = 12.sp, color = Muted, lineHeight = 17.sp)
 }
