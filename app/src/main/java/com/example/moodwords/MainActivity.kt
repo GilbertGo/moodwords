@@ -42,7 +42,60 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         AutoUpdate.cancelBackground(this)
-        setContent { MoodWordsApp() }
+        // 워치용 APK가 폰에 잘못 깔린 경우: 폰용 앱으로 안내
+        val isWatch = packageManager.hasSystemFeature(PackageManager.FEATURE_WATCH)
+        setContent { if (isWatch) MoodWordsApp() else WrongDeviceScreen() }
+    }
+}
+
+/** 폰에서 워치용 앱을 열었을 때: 폰용 앱을 바로 받아 설치하게 함 */
+@Composable
+fun WrongDeviceScreen() {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var phoneRelease by remember { mutableStateOf<Updater.Release?>(null) }
+    var progress by remember { mutableStateOf<Float?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) { phoneRelease = Updater.checkNewer(Updater.PHONE, 0) }
+
+    MaterialTheme {
+        Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("⌚", fontSize = 48.sp)
+                Spacer(Modifier.height(16.dp))
+                Text("이 앱은 갤럭시워치용이에요", fontSize = 22.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    "폰에서는 폰용 감정단어 앱을 써주세요.\n아래 버튼으로 바로 설치한 뒤, 이 앱은 지우시면 돼요.",
+                    fontSize = 15.sp, textAlign = TextAlign.Center, color = Color(0xFFBBBBBB)
+                )
+                Spacer(Modifier.height(28.dp))
+                val rel = phoneRelease
+                Chip(
+                    onClick = {
+                        if (rel == null || progress != null) return@Chip
+                        progress = 0f; error = null
+                        scope.launch {
+                            runCatching { Updater.install(context, rel) { progress = it } }
+                                .onFailure { error = "받기 실패, 다시 눌러주세요"; progress = null }
+                        }
+                    },
+                    label = {
+                        Text(
+                            when {
+                                rel == null -> "폰용 앱 찾는 중…"
+                                progress != null -> "받는 중… ${((progress ?: 0f) * 100).roundToInt()}%"
+                                else -> "폰용 앱 설치하기"
+                            },
+                            fontSize = 16.sp, fontWeight = FontWeight.Bold
+                        )
+                    },
+                    secondaryLabel = error?.let { { Text(it) } },
+                    colors = ChipDefaults.chipColors(backgroundColor = Color(0xFF5B4BDB)),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        }
     }
 }
 
