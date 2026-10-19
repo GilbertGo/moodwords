@@ -59,7 +59,13 @@ fun WrongDeviceScreen() {
     var phoneRelease by remember { mutableStateOf<Updater.Release?>(null) }
     var progress by remember { mutableStateOf<Float?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(Unit) { phoneRelease = Updater.checkNewer(Updater.PHONE, 0) }
+    var searching by remember { mutableStateOf(true) }
+    var attempt by remember { mutableIntStateOf(0) }
+    LaunchedEffect(attempt) {
+        searching = true
+        phoneRelease = Updater.checkNewer(Updater.PHONE, 0)
+        searching = false
+    }
 
     MaterialTheme {
         Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
@@ -76,7 +82,8 @@ fun WrongDeviceScreen() {
                 val rel = phoneRelease
                 Chip(
                     onClick = {
-                        if (rel == null || progress != null) return@Chip
+                        if (rel == null) { if (!searching) attempt++; return@Chip }
+                        if (progress != null) return@Chip
                         progress = 0f; error = null
                         scope.launch {
                             runCatching { Updater.install(context, rel) { progress = it } }
@@ -86,7 +93,8 @@ fun WrongDeviceScreen() {
                     label = {
                         Text(
                             when {
-                                rel == null -> "폰용 앱 찾는 중…"
+                                rel == null && searching -> "폰용 앱 찾는 중…"
+                                rel == null -> "다시 찾기"
                                 progress != null -> "받는 중… ${((progress ?: 0f) * 100).roundToInt()}%"
                                 else -> "폰용 앱 설치하기"
                             },
@@ -97,6 +105,21 @@ fun WrongDeviceScreen() {
                     colors = ChipDefaults.chipColors(backgroundColor = Color(0xFF5B4BDB)),
                     modifier = Modifier.fillMaxWidth()
                 )
+                if (rel == null && !searching) {
+                    Spacer(Modifier.height(16.dp))
+                    Text(
+                        "못 찾았어요. 인터넷 연결을 확인하거나, 여기를 눌러 브라우저로 받으세요",
+                        fontSize = 14.sp, textAlign = TextAlign.Center, color = Color(0xFF9FA8FF),
+                        modifier = Modifier.clickable {
+                            runCatching {
+                                context.startActivity(
+                                    android.content.Intent(android.content.Intent.ACTION_VIEW,
+                                        android.net.Uri.parse("https://github.com/GilbertGo/moodwords/releases"))
+                                )
+                            }
+                        }
+                    )
+                }
             }
         }
     }

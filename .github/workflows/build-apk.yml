@@ -70,3 +70,14 @@ jobs:
           files: MoodWords-phone.apk
           prerelease: true
           make_latest: false
+
+      # 오래된 릴리스 정리: 앱이 릴리스 목록 앞부분만 보므로 각 5개씩만 남김
+      - name: Clean old releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for p in build phone; do
+            gh release list --repo "$GITHUB_REPOSITORY" --limit 200 --json tagName -q '.[].tagName' \
+              | grep "^$p-[0-9]*$" | sort -t- -k2 -n -r | tail -n +6 \
+              | while read -r t; do gh release delete "$t" --repo "$GITHUB_REPOSITORY" --yes || true; done
+          done

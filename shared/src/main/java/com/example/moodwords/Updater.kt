@@ -21,7 +21,7 @@ import java.net.URL
  *            폰은 태그 phone-N / MoodWords-phone.apk (pre-release)
  */
 object Updater {
-    private const val RELEASES = "https://api.github.com/repos/GilbertGo/moodwords/releases?per_page=20"
+    private const val RELEASES = "https://api.github.com/repos/GilbertGo/moodwords/releases?per_page=100"
 
     data class Channel(val tagPrefix: String, val assetName: String)
 
