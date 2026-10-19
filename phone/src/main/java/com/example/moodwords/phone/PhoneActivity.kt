@@ -26,6 +26,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.moodwords.*
+import com.example.moodwords.AutoUpdate
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -36,6 +37,7 @@ class PhoneActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        AutoUpdate.schedule(this)
         setContent { PhoneApp() }
     }
 }
@@ -149,7 +151,16 @@ private fun HomeScreen(onStart: () -> Unit, onHistory: () -> Unit, onAbout: () -
     var update by remember { mutableStateOf<Updater.Release?>(null) }
     var progress by remember { mutableStateOf<Float?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(Unit) { update = Updater.checkNewer(Updater.PHONE, BuildConfig.VERSION_CODE) }
+    // 앱을 열면 새 버전 확인 → 있으면 바로 자동 설치 (버튼은 실패 시 다시 시도용)
+    LaunchedEffect(Unit) {
+        update = Updater.checkNewer(Updater.PHONE, BuildConfig.VERSION_CODE)
+        update?.let { rel ->
+            progress = 0f
+            runCatching { Updater.install(context, rel) { progress = it } }
+                .onFailure { error = "다운로드 실패, 다시 눌러주세요" }
+            progress = null
+        }
+    }
     val total = remember { EmotionWords.count(context) }
 
     Column(

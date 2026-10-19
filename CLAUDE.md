@@ -16,7 +16,7 @@ Wear OS(갤럭시워치) 앱 + 안드로이드 폰 앱(워치 없는 사람용, 
 
 ## 버전과 앱 내 업데이트
 - `versionCode` = `GITHUB_RUN_NUMBER`, `versionName` = `1.<번호>`. 직접 올리지 말 것.
-- `Updater.kt`가 앱 실행 시 Releases 최신 태그를 확인 → 홈 화면에 "새 버전 설치" 버튼 → 워치에서 다운로드 후 시스템 설치 확인 1번.
+- 자동 업데이트: `AutoUpdate.kt`(WorkManager, 6시간마다)와 앱 실행 시 확인 → 새 버전 있으면 바로 설치. Android 12+에서 `setRequireUserAction(NOT_REQUIRED)` + UPDATE_PACKAGES_WITHOUT_USER_ACTION 권한으로, 앱이 스스로 한 번 설치한 뒤부터는 확인 없이 조용히 업데이트. ADB/Wear Installer로 깐 직후 첫 자체 업데이트만 '설치' 확인 1번.
 - 따라서 코드를 고치고 push만 하면 사용자는 워치에서 바로 업데이트 가능. Wear Installer 재설치 안내는 서명 문제 등 예외 상황에만.
 
 ## 처음 설치 / 재설치가 필요할 때 (Wear Installer 2)

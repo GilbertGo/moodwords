@@ -36,6 +36,7 @@ private const val MEASURE_MILLIS = 15_000L
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        AutoUpdate.schedule(this)
         setContent { MoodWordsApp() }
     }
 }
@@ -102,7 +103,16 @@ fun HomeScreen(onStart: () -> Unit, onHistory: () -> Unit) {
     var error by remember { mutableStateOf<String?>(null) }
 
     // 앱을 열 때마다 GitHub에 새 버전이 있는지 확인
-    LaunchedEffect(Unit) { update = Updater.checkNewer(Updater.WATCH, BuildConfig.VERSION_CODE) }
+    // 앱을 열면 새 버전 확인 → 있으면 바로 자동 설치 (버튼은 실패 시 다시 시도용)
+    LaunchedEffect(Unit) {
+        update = Updater.checkNewer(Updater.WATCH, BuildConfig.VERSION_CODE)
+        update?.let { rel ->
+            progress = 0f
+            runCatching { Updater.install(context, rel) { progress = it } }
+                .onFailure { error = "다운로드 실패, 다시 눌러주세요" }
+            progress = null
+        }
+    }
 
     Scaffold(timeText = { TimeText() }) {
         ScalingLazyColumn(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {

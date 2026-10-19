@@ -4,6 +4,8 @@
     <!-- 앱 내 업데이트: GitHub에서 새 버전 확인·다운로드·설치 -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Android 12+: 자기 자신을 확인 없이 업데이트 -->
+    <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
 
     <application>
         <receiver

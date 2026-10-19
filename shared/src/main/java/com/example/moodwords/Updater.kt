@@ -5,6 +5,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageInstaller
+import android.os.Build
 import android.widget.Toast
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -26,6 +27,16 @@ object Updater {
 
     val WATCH = Channel("build-", "MoodWords.apk")
     val PHONE = Channel("phone-", "MoodWords-phone.apk")
+
+    /** 패키지 이름으로 채널 결정 (폰 앱은 .phone으로 끝남) */
+    fun channelOf(context: Context): Channel =
+        if (context.packageName.endsWith(".phone")) PHONE else WATCH
+
+    @Suppress("DEPRECATION")
+    fun installedVersion(context: Context): Int {
+        val info = context.packageManager.getPackageInfo(context.packageName, 0)
+        return if (Build.VERSION.SDK_INT >= 28) info.longVersionCode.toInt() else info.versionCode
+    }
 
     data class Release(val version: Int, val apkUrl: String)
 
@@ -66,6 +77,11 @@ object Updater {
             val total = conn.contentLengthLong
             val installer = context.packageManager.packageInstaller
             val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
+            // Android 12+: 이 앱이 직접 설치한 이후부터는 확인 없이 조용히 업데이트
+            // (첫 번째 자체 업데이트만 '설치' 확인이 한 번 필요)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                params.setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
+            }
             val sessionId = installer.createSession(params)
             installer.openSession(sessionId).use { session ->
                 session.openWrite("update.apk", 0, total).use { out ->
@@ -100,7 +116,8 @@ class InstallResultReceiver : BroadcastReceiver() {
                 @Suppress("DEPRECATION")
                 val confirm = intent.getParcelableExtra<Intent>(Intent.EXTRA_INTENT) ?: return
                 confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                context.startActivity(confirm)
+                // 백그라운드에서는 화면을 띄울 수 없을 수 있음 → 다음에 앱을 열 때 다시 시도
+                runCatching { context.startActivity(confirm) }
             }
             PackageInstaller.STATUS_SUCCESS -> Unit
             else -> {
