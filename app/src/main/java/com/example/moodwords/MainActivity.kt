@@ -24,6 +24,8 @@ import androidx.wear.compose.material.*
 import androidx.wear.compose.navigation.SwipeDismissableNavHost
 import androidx.wear.compose.navigation.composable
 import androidx.wear.compose.navigation.rememberSwipeDismissableNavController
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import java.text.SimpleDateFormat
@@ -165,59 +167,100 @@ fun HomeScreen(onStart: () -> Unit, onHistory: () -> Unit) {
     }
 }
 
-/** 1단계: 15초 동안 심박 측정. 권한이 없거나 센서가 없으면 건너뜀 */
+/** Wear OS 6(API 36)부터 쓰이는 새 심박 권한 */
+private const val HR_PERMISSION_NEW = "android.permission.health.READ_HEART_RATE"
+
+/**
+ * 1단계: 15초 동안 심박 측정.
+ * 진행 링과 남은 시간은 심박 값과 상관없이 흘러가고, 값이 안 들어오면 안내 문구를 보여줌.
+ * 권한이 없거나 센서가 값을 못 주면 심박 없이 다음 질문으로 넘어감. 언제든 건너뛰기 가능.
+ */
 @Composable
 fun MeasureScreen(store: MoodStore, onDone: (Int?) -> Unit) {
     val context = LocalContext.current
-    var granted by remember {
-        mutableStateOf(
-            ContextCompat.checkSelfPermission(context, Manifest.permission.BODY_SENSORS) ==
-                PackageManager.PERMISSION_GRANTED
-        )
+    fun hasPermission() = listOf(Manifest.permission.BODY_SENSORS, HR_PERMISSION_NEW).any {
+        ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
     }
-    var asked by remember { mutableStateOf(false) }
-    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
-        granted = it; asked = true
+    // 0 = 권한 묻는 중, 1 = 허용됨, -1 = 거부됨
+    var permState by remember { mutableIntStateOf(if (hasPermission()) 1 else 0) }
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { res ->
+        permState = if (res.values.any { it } || hasPermission()) 1 else -1
     }
     var current by remember { mutableStateOf<Int?>(null) }
-    var progress by remember { mutableFloatStateOf(0f) }
+    var elapsed by remember { mutableLongStateOf(0L) }
+    var finished by remember { mutableStateOf(false) }
+    val samples = remember { mutableListOf<Double>() }
 
-    LaunchedEffect(Unit) { if (!granted) launcher.launch(Manifest.permission.BODY_SENSORS) }
+    fun finish(bpm: Int?) {
+        if (!finished) { finished = true; onDone(bpm) }
+    }
 
-    LaunchedEffect(granted, asked) {
-        if (!granted) {
-            if (asked) onDone(null)
-            return@LaunchedEffect
-        }
-        val samples = mutableListOf<Double>()
-        val start = System.currentTimeMillis()
-        withTimeoutOrNull(MEASURE_MILLIS) {
-            heartRateFlow(context).collect { bpm ->
-                samples += bpm
-                current = bpm.roundToInt()
-                progress = ((System.currentTimeMillis() - start) / MEASURE_MILLIS.toFloat()).coerceAtMost(1f)
+    LaunchedEffect(Unit) {
+        if (permState == 0) launcher.launch(arrayOf(Manifest.permission.BODY_SENSORS, HR_PERMISSION_NEW))
+    }
+
+    LaunchedEffect(permState) {
+        when (permState) {
+            -1 -> { delay(1500); finish(null) }
+            1 -> {
+                val start = System.currentTimeMillis()
+                coroutineScope {
+                    // 심박은 따로 받고, 시간은 그와 상관없이 흘러감
+                    val reader = launch {
+                        runCatching {
+                            heartRateFlow(context).collect { bpm ->
+                                samples += bpm
+                                current = bpm.roundToInt()
+                            }
+                        }
+                    }
+                    while (elapsed < MEASURE_MILLIS) {
+                        delay(200)
+                        elapsed = System.currentTimeMillis() - start
+                    }
+                    reader.cancel()
+                }
+                // 측정 초반은 불안정하니 뒤쪽 절반만 평균
+                val avg = samples.drop(samples.size / 2).takeIf { it.isNotEmpty() }?.average()
+                finish(avg?.roundToInt())
             }
         }
-        // 측정 초반은 불안정하니 뒤쪽 절반만 평균
-        val avg = samples.drop(samples.size / 2).takeIf { it.isNotEmpty() }?.average()
-        onDone(avg?.roundToInt())
+    }
+
+    val secondsLeft = ((MEASURE_MILLIS - elapsed).coerceAtLeast(0) + 999) / 1000
+    val status = when {
+        permState == 0 -> "심박 권한을 허용해 주세요"
+        permState == -1 -> "권한이 없어 직접 고를게요"
+        current != null -> "편하게 숨 쉬세요"
+        elapsed > 4000 -> "심박을 찾는 중이에요\n워치를 손목에 꼭 맞게 차주세요"
+        else -> "센서 준비 중…"
     }
 
     Scaffold(timeText = { TimeText() }) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             CircularProgressIndicator(
-                progress = progress,
+                progress = (elapsed / MEASURE_MILLIS.toFloat()).coerceIn(0f, 1f),
                 modifier = Modifier.fillMaxSize().padding(4.dp),
                 indicatorColor = Color(0xFFFF6B8A),
                 strokeWidth = 5.dp
             )
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("♥", color = Color(0xFFFF6B8A), fontSize = 22.sp)
-                Text(current?.let { "$it" } ?: "--", fontSize = 36.sp, fontWeight = FontWeight.Bold)
-                Text("bpm", fontSize = 12.sp, color = Color.Gray)
+                Text("♥", color = Color(0xFFFF6B8A), fontSize = 20.sp)
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text(current?.let { "$it" } ?: "--", fontSize = 32.sp, fontWeight = FontWeight.Bold)
+                    Text(" bpm", fontSize = 12.sp, color = Color.Gray, modifier = Modifier.padding(bottom = 6.dp))
+                }
+                Text(status, fontSize = 12.sp, textAlign = TextAlign.Center)
+                Text(
+                    if (permState == 1) "${secondsLeft}초 · 평소 ${store.restingBpm.roundToInt()}bpm" else "",
+                    fontSize = 10.sp, color = Color.Gray
+                )
                 Spacer(Modifier.height(6.dp))
-                Text("편하게 숨 쉬세요", fontSize = 12.sp)
-                Text("평소 ${store.restingBpm.roundToInt()}bpm", fontSize = 10.sp, color = Color.Gray)
+                CompactChip(
+                    onClick = { finish(current) },
+                    label = { Text("건너뛰기") },
+                    colors = ChipDefaults.secondaryChipColors(),
+                )
             }
         }
     }
