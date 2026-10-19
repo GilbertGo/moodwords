@@ -38,7 +38,7 @@ class PhoneActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        AutoUpdate.schedule(this)
+        AutoUpdate.cancelBackground(this)
         setContent { PhoneApp() }
     }
 }

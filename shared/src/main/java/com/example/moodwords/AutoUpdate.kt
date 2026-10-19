@@ -1,42 +1,23 @@
 package com.example.moodwords
 
 import android.content.Context
-import androidx.work.Constraints
 import androidx.work.CoroutineWorker
-import androidx.work.ExistingPeriodicWorkPolicy
-import androidx.work.NetworkType
-import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
-import java.util.concurrent.TimeUnit
 
 /**
- * 자동 업데이트: 앱을 열지 않아도 6시간마다 GitHub에서 새 버전을 확인하고 설치.
- * 앱이 스스로 설치한 적이 있으면(두 번째 업데이트부터) 확인 없이 조용히 설치됨.
+ * 백그라운드 자동 설치는 꺼둠 (사용자 요청): 업데이트는 앱을 열 때 안내 창에서만.
+ * 예전 버전이 예약해 둔 6시간 주기 작업이 남아 있을 수 있어서, 앱을 열 때 취소함.
  */
 object AutoUpdate {
     private const val WORK = "moodwords-auto-update"
 
-    fun schedule(context: Context) {
-        val request = PeriodicWorkRequestBuilder<UpdateWorker>(6, TimeUnit.HOURS)
-            .setConstraints(
-                Constraints.Builder()
-                    .setRequiredNetworkType(NetworkType.CONNECTED)
-                    .setRequiresBatteryNotLow(true)
-                    .build()
-            )
-            .build()
-        WorkManager.getInstance(context)
-            .enqueueUniquePeriodicWork(WORK, ExistingPeriodicWorkPolicy.KEEP, request)
+    fun cancelBackground(context: Context) {
+        WorkManager.getInstance(context).cancelUniqueWork(WORK)
     }
 }
 
+/** 예전 예약 작업이 취소 전에 한 번 더 실행돼도 아무것도 하지 않음 */
 class UpdateWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
-    override suspend fun doWork(): Result {
-        val ctx = applicationContext
-        val release = Updater.checkNewer(Updater.channelOf(ctx), Updater.installedVersion(ctx))
-            ?: return Result.success()
-        return runCatching { Updater.install(ctx, release) {} }
-            .fold({ Result.success() }, { Result.retry() })
-    }
+    override suspend fun doWork(): Result = Result.success()
 }

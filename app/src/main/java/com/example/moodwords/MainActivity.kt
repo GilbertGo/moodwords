@@ -39,7 +39,7 @@ private const val MEASURE_MILLIS = 15_000L
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        AutoUpdate.schedule(this)
+        AutoUpdate.cancelBackground(this)
         setContent { MoodWordsApp() }
     }
 }
