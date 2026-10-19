@@ -102,6 +102,21 @@ object EmotionWords {
         return match.sortedWith(order) + rest.sortedWith(order)
     }
 
+    /**
+     * 처음 보여줄 단어. 같은 답을 골라도 매번 같은 단어만 나오지 않도록
+     * 앞쪽 후보(원인 일치·흔한 말) 몇 개를 차례로 돌려 가며 보여줌.
+     */
+    fun pickFirst(context: Context, words: List<EmotionWord>, energy: Energy, valence: Valence, cause: Cause): EmotionWord {
+        val top = words.take(ROTATE)
+        val prefs = context.getSharedPreferences("rotate", Context.MODE_PRIVATE)
+        val key = "${energy}_${valence}_${cause}"
+        val n = prefs.getInt(key, 0)
+        prefs.edit().putInt(key, n + 1).apply()
+        return top[n % top.size]
+    }
+
+    private const val ROTATE = 6
+
     /** 원인에 딱 맞는 단어가 몇 개인지 (결과 화면 안내용) */
     fun matchCount(words: List<EmotionWord>, cause: Cause): Int =
         if (cause == Cause.ANY) words.size else words.count { cause in it.causes }

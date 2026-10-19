@@ -374,7 +374,7 @@ private fun ResultScreen(check: Check, onSave: (String) -> Unit, onRestart: () -
     val cause = check.cause ?: Cause.ANY
     val words = remember(energy, valence, cause) { EmotionWords.find(context, energy, valence, cause) }
     if (words.isEmpty()) return
-    var chosen by remember(words) { mutableStateOf(words.first()) }
+    var chosen by remember(words) { mutableStateOf(EmotionWords.pickFirst(context, words, energy, valence, cause)) }
     var showAll by remember(words) { mutableStateOf(false) }
     val others = words.filter { it != chosen }
     val shown = if (showAll) others else others.take(FIRST_SHOWN)

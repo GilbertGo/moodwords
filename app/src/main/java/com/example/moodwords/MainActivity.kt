@@ -542,7 +542,7 @@ fun ResultScreen(check: CheckState, onSave: (String) -> Unit) {
     val cause = check.cause ?: Cause.ANY
     val words = remember(energy, valence, cause) { EmotionWords.find(context, energy, valence, cause) }
     if (words.isEmpty()) return
-    var chosen by remember(words) { mutableStateOf(words.first()) }
+    var chosen by remember(words) { mutableStateOf(EmotionWords.pickFirst(context, words, energy, valence, cause)) }
     var picking by remember { mutableStateOf(false) }
     val color = Color(EmotionWords.argbOf(valence))
     val quotes = remember(chosen) { Quotes.forWord(context, chosen) }
