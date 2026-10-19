@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-feature android:name="android.hardware.type.watch" />
+    <uses-feature android:name="android.hardware.sensor.heartrate" android:required="false" />
+
+    <uses-permission android:name="android.permission.BODY_SENSORS" />
+    <!-- Wear OS 6(API 36) 이상에서 쓰이는 새 심박 권한 -->
+    <uses-permission android:name="android.permission.health.READ_HEART_RATE" />
+
+    <application
+        android:allowBackup="true"
+        android:icon="@android:drawable/btn_star_big_on"
+        android:label="@string/app_name"
+        android:theme="@android:style/Theme.DeviceDefault">
+
+        <meta-data
+            android:name="com.google.android.wearable.standalone"
+            android:value="true" />
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:taskAffinity="">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
