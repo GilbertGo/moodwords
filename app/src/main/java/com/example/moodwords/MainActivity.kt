@@ -11,6 +11,9 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.background
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -119,11 +122,13 @@ fun MoodWordsApp() {
     val nav = rememberSwipeDismissableNavController()
 
     MaterialTheme {
-        SwipeDismissableNavHost(navController = nav, startDestination = "home") {
+        SwipeDismissableNavHost(navController = nav, startDestination = if (Guide.seen(context)) "home" else "guide") {
             composable("home") {
                 HomeScreen(
                     onStart = { check.reset(); nav.navigate("measure") },
                     onHistory = { nav.navigate("history") },
+                    onWeek = { nav.navigate("week") },
+                    onGuide = { nav.navigate("guide") },
                 )
             }
             composable("measure") {
@@ -148,18 +153,28 @@ fun MoodWordsApp() {
             composable("result") {
                 ResultScreen(check) { word ->
                     store.add(
-                        MoodEntry(System.currentTimeMillis(), word, check.bpm, check.energy!!, check.valence!!, check.tremor)
+                        MoodEntry(System.currentTimeMillis(), word, check.bpm, check.energy!!, check.valence!!, check.tremor, check.cause)
                     )
                     nav.navigate("history") { popUpTo("home") }
                 }
             }
             composable("history") { HistoryScreen(store) }
+            composable("week") { WeekScreen(store) }
+            composable("guide") {
+                GuideScreen {
+                    Guide.markSeen(context)
+                    nav.navigate("home") {
+                        popUpTo("guide") { inclusive = true }
+                        launchSingleTop = true
+                    }
+                }
+            }
         }
     }
 }
 
 @Composable
-fun HomeScreen(onStart: () -> Unit, onHistory: () -> Unit) {
+fun HomeScreen(onStart: () -> Unit, onHistory: () -> Unit, onWeek: () -> Unit, onGuide: () -> Unit) {
     var update by remember { mutableStateOf<Updater.Release?>(null) }
     var dismissed by rememberSaveable { mutableStateOf(false) }
 
@@ -190,6 +205,17 @@ fun HomeScreen(onStart: () -> Unit, onHistory: () -> Unit) {
                     colors = ChipDefaults.secondaryChipColors(),
                     modifier = Modifier.fillMaxWidth()
                 )
+            }
+            item {
+                Chip(
+                    onClick = onWeek,
+                    label = { Text("이번 주 돌아보기") },
+                    colors = ChipDefaults.secondaryChipColors(),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+            item {
+                CompactChip(onClick = onGuide, label = { Text("사용법") }, colors = ChipDefaults.secondaryChipColors())
             }
             if (rel != null) item {
                 CompactChip(
@@ -567,6 +593,81 @@ fun HistoryScreen(store: MoodStore) {
                     colors = ChipDefaults.secondaryChipColors(),
                     modifier = Modifier.fillMaxWidth()
                 )
+            }
+        }
+    }
+}
+
+
+/** 앱 소개: 처음 열 때, 그리고 홈의 '사용법'에서 */
+@Composable
+fun GuideScreen(onDone: () -> Unit) {
+    val sections = remember { Guide.sections(isWatch = true) }
+    Scaffold(timeText = { TimeText() }) {
+        ScalingLazyColumn(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
+            item { Text("감정단어 사용법", fontSize = 16.sp, fontWeight = FontWeight.Bold) }
+            sections.forEach { sec ->
+                item { Text(sec.title, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFFB9AEFF)) }
+                item { Text(sec.body, fontSize = 12.sp, color = Color(0xFFDDDDDD)) }
+            }
+            item {
+                Chip(
+                    onClick = onDone,
+                    label = { Text("시작하기", fontWeight = FontWeight.Bold) },
+                    colors = ChipDefaults.primaryChipColors(),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        }
+    }
+}
+
+/** 이번 주 돌아보기 (워치용 요약) */
+@Composable
+fun WeekScreen(store: MoodStore) {
+    val all = remember { store.entries() }
+    var weeksAgo by remember { mutableIntStateOf(0) }
+    val w = remember(weeksAgo) { Weekly.summarize(all, weeksAgo) }
+    val fmt = remember { SimpleDateFormat("M/d", Locale.KOREA) }
+
+    Scaffold(timeText = { TimeText() }) {
+        ScalingLazyColumn(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
+            item { Text(if (weeksAgo == 0) "이번 주" else "${weeksAgo}주 전", fontSize = 16.sp, fontWeight = FontWeight.Bold) }
+            item { Text("${fmt.format(Date(w.start))} – ${fmt.format(Date(w.end - 1))}", fontSize = 11.sp, color = Color.Gray) }
+            item { Text(w.insight, fontSize = 12.sp, textAlign = TextAlign.Center) }
+            if (w.needsCare) item {
+                Text("힘든 날이 많았네요. 가까운 사람이나 전문가에게 이야기해 보세요. 109는 24시간 열려 있어요.",
+                    fontSize = 11.sp, textAlign = TextAlign.Center, color = Color(0xFFB9AEFF))
+            }
+            if (w.count > 0) {
+                item {
+                    // 기분 비율 막대
+                    Row(Modifier.fillMaxWidth().height(12.dp).clip(RoundedCornerShape(6.dp)).background(Color(0xFF333333))) {
+                        Valence.entries.forEach { v ->
+                            val n = w.valence.getValue(v)
+                            if (n > 0) Box(Modifier.weight(n.toFloat()).fillMaxHeight().background(Color(EmotionWords.argbOf(v))))
+                        }
+                    }
+                }
+                item {
+                    Text(
+                        Valence.entries.joinToString(" · ") { "${it.label} ${w.pct(w.valence.getValue(it))}%" },
+                        fontSize = 10.sp, color = Color.Gray, textAlign = TextAlign.Center
+                    )
+                }
+                item { Text("많이 고른 감정", fontSize = 12.sp, fontWeight = FontWeight.Bold) }
+                w.topWords.take(3).forEach { (word, n) ->
+                    item {
+                        val v = w.entries.last { it.word == word }.valence
+                        Text("$word  ${n}번", fontSize = 14.sp, color = Color(EmotionWords.argbOf(v)))
+                    }
+                }
+            }
+            item {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    CompactChip(onClick = { weeksAgo++ }, label = { Text("‹ 이전") }, colors = ChipDefaults.secondaryChipColors())
+                    if (weeksAgo > 0) CompactChip(onClick = { weeksAgo-- }, label = { Text("다음 ›") }, colors = ChipDefaults.secondaryChipColors())
+                }
             }
         }
     }

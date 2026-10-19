@@ -66,7 +66,7 @@ private val scheme = lightColorScheme(
 )
 
 // ── 화면 상태 ─────────────────────────────────────────────
-private enum class Screen { HOME, ENERGY, VALENCE, CAUSE, RESULT, HISTORY, ABOUT }
+private enum class Screen { HOME, ENERGY, VALENCE, CAUSE, RESULT, HISTORY, ABOUT, WEEK, GUIDE }
 
 private class Check {
     var energy by mutableStateOf<Energy?>(null)
@@ -80,7 +80,8 @@ fun PhoneApp() {
     val context = LocalContext.current
     val store = remember { MoodStore(context) }
     val check = remember { Check() }
-    var screen by remember { mutableStateOf(Screen.HOME) }
+    // 처음 열면 앱 소개부터
+    var screen by remember { mutableStateOf(if (Guide.seen(context)) Screen.HOME else Screen.GUIDE) }
 
     // 뒤로가기: 질문은 한 단계씩, 나머지는 홈으로
     BackHandler(enabled = screen != Screen.HOME) {
@@ -100,6 +101,8 @@ fun PhoneApp() {
                         onStart = { check.reset(); screen = Screen.ENERGY },
                         onHistory = { screen = Screen.HISTORY },
                         onAbout = { screen = Screen.ABOUT },
+                        onWeek = { screen = Screen.WEEK },
+                        onGuide = { screen = Screen.GUIDE },
                     )
                     Screen.ENERGY -> Question(
                         step = 1,
@@ -133,13 +136,15 @@ fun PhoneApp() {
                     Screen.RESULT -> ResultScreen(
                         check,
                         onSave = { word ->
-                            store.add(MoodEntry(System.currentTimeMillis(), word, null, check.energy!!, check.valence!!))
+                            store.add(MoodEntry(System.currentTimeMillis(), word, null, check.energy!!, check.valence!!, null, check.cause))
                             screen = Screen.HISTORY
                         },
                         onRestart = { check.reset(); screen = Screen.ENERGY },
                     )
                     Screen.HISTORY -> HistoryScreen(store, onBack = { screen = Screen.HOME })
                     Screen.ABOUT -> AboutScreen(onBack = { screen = Screen.HOME })
+                    Screen.WEEK -> WeekScreen(store, onBack = { screen = Screen.HOME })
+                    Screen.GUIDE -> GuideScreen(onDone = { Guide.markSeen(context); screen = Screen.HOME })
                 }
             }
         }
@@ -148,7 +153,7 @@ fun PhoneApp() {
 
 // ── 홈 ───────────────────────────────────────────────────
 @Composable
-private fun HomeScreen(onStart: () -> Unit, onHistory: () -> Unit, onAbout: () -> Unit) {
+private fun HomeScreen(onStart: () -> Unit, onHistory: () -> Unit, onAbout: () -> Unit, onWeek: () -> Unit, onGuide: () -> Unit) {
     val context = LocalContext.current
     var update by remember { mutableStateOf<Updater.Release?>(null) }
     var showUpdate by remember { mutableStateOf(false) }
@@ -196,8 +201,19 @@ private fun HomeScreen(onStart: () -> Unit, onHistory: () -> Unit, onAbout: () -
             modifier = Modifier.fillMaxWidth().height(56.dp),
             shape = RoundedCornerShape(16.dp),
         ) { Text("감정 기록 보기", fontSize = 16.sp, color = Ink) }
+        Spacer(Modifier.height(12.dp))
+        OutlinedButton(
+            onClick = onWeek,
+            modifier = Modifier.fillMaxWidth().height(56.dp),
+            shape = RoundedCornerShape(16.dp),
+        ) { Text("이번 주 돌아보기", fontSize = 16.sp, color = Ink) }
 
         Spacer(Modifier.height(28.dp))
+        Text(
+            "앱 소개 · 사용법",
+            fontSize = 14.sp, color = Accent,
+            modifier = Modifier.clickable(onClick = onGuide).padding(vertical = 6.dp)
+        )
         Text(
             "감정 단어 ${"%,d".format(total)}개 · 연구 근거 보기",
             fontSize = 14.sp, color = Accent,
@@ -529,4 +545,186 @@ private fun Section(title: String, body: String) {
     Spacer(Modifier.height(6.dp))
     Text(body, fontSize = 15.sp, lineHeight = 23.sp, color = Ink.copy(alpha = 0.85f))
     Spacer(Modifier.height(22.dp))
+}
+
+
+// ── 앱 소개 ─────────────────────────────────────────────
+@Composable
+private fun GuideScreen(onDone: () -> Unit) {
+    val sections = remember { Guide.sections(isWatch = false) }
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp)) {
+        Spacer(Modifier.height(16.dp))
+        Text("감정단어 사용법", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = Ink)
+        Spacer(Modifier.height(24.dp))
+        sections.forEach { sec ->
+            Text(sec.title, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = Ink)
+            Spacer(Modifier.height(6.dp))
+            Text(sec.body, fontSize = 15.sp, lineHeight = 24.sp, color = Ink.copy(alpha = 0.85f))
+            Spacer(Modifier.height(22.dp))
+        }
+        Button(
+            onClick = onDone,
+            modifier = Modifier.fillMaxWidth().height(56.dp),
+            shape = RoundedCornerShape(16.dp),
+        ) { Text("시작하기", fontSize = 17.sp, fontWeight = FontWeight.SemiBold) }
+        Spacer(Modifier.height(24.dp))
+    }
+}
+
+// ── 이번 주 돌아보기 ─────────────────────────────────────
+private fun valenceColor(v: Valence) = tint(v)
+private val energyColors = mapOf(
+    Energy.HIGH to Color(0xFFE07A5F), Energy.MID to Color(0xFFF2CC8F), Energy.LOW to Color(0xFF81B29A)
+)
+
+@Composable
+private fun WeekScreen(store: MoodStore, onBack: () -> Unit) {
+    val all = remember { store.entries() }
+    var weeksAgo by remember { mutableIntStateOf(0) }
+    val w = remember(weeksAgo) { Weekly.summarize(all, weeksAgo) }
+    val dayFmt = remember { SimpleDateFormat("M월 d일", Locale.KOREA) }
+    val dow = remember { SimpleDateFormat("E", Locale.KOREA) }
+
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp)) {
+        Spacer(Modifier.height(20.dp))
+        TextButton(onClick = onBack, contentPadding = PaddingValues(0.dp)) { Text("← 처음으로", color = Muted) }
+        Text(if (weeksAgo == 0) "이번 주 돌아보기" else "${weeksAgo}주 전 돌아보기", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = Ink)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TextButton(onClick = { weeksAgo++ }) { Text("‹ 이전", color = Accent) }
+            Text(
+                "${dayFmt.format(Date(w.start))} – ${dayFmt.format(Date(w.end - 1))}",
+                fontSize = 14.sp, color = Muted, modifier = Modifier.weight(1f), textAlign = TextAlign.Center
+            )
+            TextButton(onClick = { if (weeksAgo > 0) weeksAgo-- }, enabled = weeksAgo > 0) { Text("다음 ›") }
+        }
+
+        // 한 줄 정리
+        InfoCard(Color(0xFFEDEBFC)) {
+            Text(w.insight, fontSize = 16.sp, lineHeight = 25.sp, color = Ink)
+            if (w.needsCare) {
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    "힘든 날이 많았던 한 주네요. 혼자 견디지 말고 가까운 사람이나 전문가에게 이야기해 보세요. 109(자살예방 상담전화)는 24시간 열려 있어요.",
+                    fontSize = 14.sp, lineHeight = 21.sp, color = Color(0xFF5B4BDB)
+                )
+            }
+        }
+        if (w.count == 0) return@Column
+
+        // 요일별 기록: 점 하나 = 기록 하나, 색 = 기분
+        SectionTitle("날마다")
+        InfoCard(Color.White) {
+            Row(Modifier.fillMaxWidth()) {
+                w.days.forEach { (d0, list) ->
+                    Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(dow.format(Date(d0)), fontSize = 13.sp, color = Muted)
+                        Spacer(Modifier.height(8.dp))
+                        list.take(6).forEach { e ->
+                            Box(Modifier.padding(2.dp).size(14.dp).clip(RoundedCornerShape(7.dp)).background(valenceColor(e.valence)))
+                        }
+                        if (list.size > 6) Text("+${list.size - 6}", fontSize = 11.sp, color = Muted)
+                        if (list.isEmpty()) Text("·", fontSize = 13.sp, color = Line)
+                    }
+                }
+            }
+        }
+
+        // 기분 · 에너지 비율
+        SectionTitle("기분")
+        InfoCard(Color.White) {
+            StackBar(Valence.entries.map { Triple(it.label, w.valence.getValue(it), valenceColor(it)) }, w.count)
+        }
+        SectionTitle("몸의 에너지")
+        InfoCard(Color.White) {
+            StackBar(Energy.entries.map { Triple(it.label, w.energy.getValue(it), energyColors.getValue(it)) }, w.count)
+        }
+
+        // 많이 고른 감정
+        SectionTitle("많이 고른 감정")
+        InfoCard(Color.White) {
+            w.topWords.forEach { (word, n) ->
+                val v = w.entries.last { it.word == word }.valence
+                Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(word, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = deep(v), modifier = Modifier.width(120.dp))
+                    Box(Modifier.weight(1f).height(10.dp).clip(RoundedCornerShape(5.dp)).background(Line)) {
+                        Box(Modifier.fillMaxHeight().fillMaxWidth(n / w.topWords.first().second.toFloat()).clip(RoundedCornerShape(5.dp)).background(valenceColor(v)))
+                    }
+                    Text("  ${n}번", fontSize = 14.sp, color = Muted)
+                }
+            }
+        }
+
+        // 시간대
+        SectionTitle("시간대별")
+        InfoCard(Color.White) {
+            TimeSlot.entries.forEach { s ->
+                val list = w.slots.getValue(s)
+                Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(s.label, fontSize = 15.sp, color = Ink, modifier = Modifier.width(48.dp))
+                    Row(Modifier.weight(1f).height(14.dp).clip(RoundedCornerShape(7.dp)).background(Line)) {
+                        Valence.entries.forEach { v ->
+                            val c = list.count { it.valence == v }
+                            if (c > 0) Box(Modifier.weight(c.toFloat()).fillMaxHeight().background(valenceColor(v)))
+                        }
+                        if (list.isEmpty()) Spacer(Modifier.weight(1f))
+                    }
+                    Text("  ${list.size}번", fontSize = 14.sp, color = Muted, modifier = Modifier.width(52.dp))
+                }
+            }
+            Text("아침 5–11시 · 낮 11–17시 · 저녁 17–22시 · 밤 22–5시", fontSize = 12.sp, color = Muted)
+        }
+
+        // 원인
+        SectionTitle("무엇 때문에")
+        InfoCard(Color.White) {
+            if (w.causes.isEmpty()) {
+                Text("이번 버전부터 원인이 함께 기록돼요. 다음 주부터 여기에 보여요.", fontSize = 14.sp, color = Muted)
+            } else {
+                val total = w.causes.values.sum()
+                w.causes.entries.sortedByDescending { it.value }.forEach { (c, n) ->
+                    Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(c.label.removeSuffix(" 때문에"), fontSize = 15.sp, color = Ink, modifier = Modifier.width(120.dp))
+                        Box(Modifier.weight(1f).height(10.dp).clip(RoundedCornerShape(5.dp)).background(Line)) {
+                            Box(Modifier.fillMaxHeight().fillMaxWidth(n / total.toFloat()).clip(RoundedCornerShape(5.dp)).background(Accent))
+                        }
+                        Text("  ${(n * 100.0 / total).roundToInt()}%", fontSize = 14.sp, color = Muted, modifier = Modifier.width(52.dp))
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(32.dp))
+    }
+}
+
+@Composable
+private fun SectionTitle(text: String) {
+    Spacer(Modifier.height(22.dp))
+    Text(text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = Ink)
+    Spacer(Modifier.height(8.dp))
+}
+
+@Composable
+private fun InfoCard(bg: Color, content: @Composable ColumnScope.() -> Unit) {
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(bg)
+            .border(1.dp, Line, RoundedCornerShape(18.dp)).padding(18.dp),
+        content = content
+    )
+}
+
+/** 비율 막대 + 범례 */
+@Composable
+private fun StackBar(parts: List<Triple<String, Int, Color>>, total: Int) {
+    Row(Modifier.fillMaxWidth().height(18.dp).clip(RoundedCornerShape(9.dp)).background(Line)) {
+        parts.forEach { (_, n, c) -> if (n > 0) Box(Modifier.weight(n.toFloat()).fillMaxHeight().background(c)) }
+    }
+    Spacer(Modifier.height(10.dp))
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        parts.forEach { (label, n, c) ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(10.dp).clip(RoundedCornerShape(5.dp)).background(c))
+                Text(" $label ${if (total == 0) 0 else (n * 100.0 / total).roundToInt()}%", fontSize = 13.sp, color = Ink)
+            }
+        }
+    }
 }

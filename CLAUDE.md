@@ -36,5 +36,8 @@ Wear OS(갤럭시워치) 앱 + 안드로이드 폰 앱(워치 없는 사람용, 
 - `Motion.kt` 가속도 센서 0.5초 창: movement(큰 동작 RMS, >0.8 이동 중)·tremor(약 3Hz 고역 RMS). 측정은 가만히 있는 시간 15초(최대 30초), 움직이는 동안 심박 버림. 떨림은 평소값(MoodStore.restingTremor) 대비 1.6배↑ 많음 → 에너지 한 단계 올림. 기록 6번째 필드에 tremor 저장
 - `MoodStore.kt` SharedPreferences 기록, 안정 심박 학습
 - `MainActivity.kt` 화면: home → measure → energy → valence → cause → result → history
+- `Weekly.kt` 주간 요약(최근 7일, 이전 주 이동): 기분·에너지 비율, 많이 고른 감정, 시간대(아침5–11/낮11–17/저녁17–22/밤), 원인, 한 줄 정리(숫자 사실만, 조언 없음). 안 좋은 쪽 70%↑·5회↑면 109 안내
+- `Guide.kt` 앱 소개(목적·사용법·요령·좋은 점·알아두세요). 첫 실행 시 표시, 홈에서 다시 보기
+- 기록 7번째 필드 = cause
 - `Updater.kt` 업데이트 확인·설치 (Channel WATCH/PHONE, PackageInstaller)
 - `phone/.../PhoneActivity.kt` 홈(3×3 지도) → 질문 3개 → 결과(근거 표시) → 기록, 연구 근거 화면

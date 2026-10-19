@@ -9,9 +9,10 @@ data class MoodEntry(
     val energy: Energy,
     val valence: Valence,
     val tremor: Double? = null,  // 워치: 가만히 있을 때 손 떨림 정도 (없으면 null)
+    val cause: Cause? = null,    // 무엇 때문에 (v1.20 이전 기록은 null)
 )
 
-/** 워치 안에만 저장되는 간단한 기록 저장소 */
+/** 기기 안에만 저장되는 간단한 기록 저장소 (밖으로 보내지 않음) */
 class MoodStore(context: Context) {
     private val prefs = context.getSharedPreferences("mood", Context.MODE_PRIVATE)
 
@@ -35,13 +36,14 @@ class MoodStore(context: Context) {
                     MoodEntry(
                         p[0].toLong(), p[1], p[2].toIntOrNull(), Energy.valueOf(p[3]), Valence.valueOf(p[4]),
                         p.getOrNull(5)?.toDoubleOrNull(),
+                        p.getOrNull(6)?.let { c -> Cause.entries.firstOrNull { it.name == c } },
                     )
                 }.getOrNull()
             }
             .sortedByDescending { it.time }
 
     fun add(e: MoodEntry) {
-        val line = "${e.time}|${e.word}|${e.bpm ?: ""}|${e.energy.name}|${e.valence.name}|${e.tremor ?: ""}"
+        val line = "${e.time}|${e.word}|${e.bpm ?: ""}|${e.energy.name}|${e.valence.name}|${e.tremor ?: ""}|${e.cause?.name ?: ""}"
         val kept = prefs.getString("entries", "")!!.lines().filter { it.isNotBlank() }.takeLast(199)
         prefs.edit().putString("entries", (kept + line).joinToString("\n")).apply()
 
