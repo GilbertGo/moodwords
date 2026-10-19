@@ -25,7 +25,7 @@ Wear OS(갤럭시워치) 앱. 심박 측정 → 질문 2개 → 감정 단어와
 - APK는 폰 브라우저로 Releases에서 받기. 소스 zip 폴더와 헷갈리지 않게 안내.
 
 ## 코드 구조
-- `EmotionWords.kt` 에너지×기분 3×3, 27개 단어와 뜻, 심박→에너지 추정
+- `EmotionWords.kt` 에너지×기분 3×3, 28개 단어와 뜻, 심박→에너지 추정
 - `HeartRate.kt` Health Services 심박 Flow (Guava 의존성 필요)
 - `MoodStore.kt` SharedPreferences 기록, 안정 심박 학습
 - `MainActivity.kt` 화면: home → measure → energy → valence → result → history
