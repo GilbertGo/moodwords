@@ -45,7 +45,8 @@ class CheckState {
     var bpm by mutableStateOf<Int?>(null)
     var energy by mutableStateOf<Energy?>(null)
     var valence by mutableStateOf<Valence?>(null)
-    fun reset() { bpm = null; energy = null; valence = null }
+    var cause by mutableStateOf<Cause?>(null)
+    fun reset() { bpm = null; energy = null; valence = null; cause = null }
 }
 
 @Composable
@@ -74,7 +75,10 @@ fun MoodWordsApp() {
                 EnergyQuestion(check) { nav.navigate("valence") }
             }
             composable("valence") {
-                ValenceQuestion(check) { nav.navigate("result") }
+                ValenceQuestion(check) { nav.navigate("cause") }
+            }
+            composable("cause") {
+                CauseQuestion(check) { nav.navigate("result") }
             }
             composable("result") {
                 ResultScreen(check) { word ->
@@ -232,6 +236,17 @@ fun ValenceQuestion(check: CheckState, onNext: () -> Unit) {
     ) { check.valence = it; onNext() }
 }
 
+/** 4단계: 무엇 때문인지 묻기 — 1,000개 중 후보를 좁힘 */
+@Composable
+fun CauseQuestion(check: CheckState, onNext: () -> Unit) {
+    QuestionScreen(
+        title = "무엇 때문인 것 같아요?",
+        hint = null,
+        options = Cause.entries.map { it to it.label },
+        selected = check.cause,
+    ) { check.cause = it; onNext() }
+}
+
 @Composable
 fun <T> QuestionScreen(
     title: String,
@@ -259,19 +274,38 @@ fun <T> QuestionScreen(
     }
 }
 
-/** 4단계: 감정 단어 + 뜻. 다른 단어를 골라 바꿀 수 있고, 기록하기로 저장 */
+private const val FIRST_SHOWN = 8
+
+/** 5단계: 감정 단어 + 뜻. 원인에 맞는 후보 8개를 먼저, "더 보기"로 같은 칸 전체 */
 @Composable
 fun ResultScreen(check: CheckState, onSave: (String) -> Unit) {
+    val context = LocalContext.current
     val energy = check.energy ?: return
     val valence = check.valence ?: return
-    val words = remember(energy, valence) { EmotionWords.find(energy, valence) }
+    val cause = check.cause ?: Cause.ANY
+    val words = remember(energy, valence, cause) { EmotionWords.find(context, energy, valence, cause) }
+    if (words.isEmpty()) return
     var chosen by remember(words) { mutableStateOf(words.first()) }
+    var showAll by remember(words) { mutableStateOf(false) }
     val color = EmotionWords.colorOf(valence)
+    val others = words.filter { it != chosen }
+    val shown = if (showAll) others else others.take(FIRST_SHOWN)
+    // 긴 표현도 한 화면에 들어가게 글자 크기 조절
+    val wordSize = when {
+        chosen.word.length <= 4 -> 32.sp
+        chosen.word.length <= 7 -> 24.sp
+        else -> 18.sp
+    }
 
     Scaffold(timeText = { TimeText() }) {
         ScalingLazyColumn(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
             item { Text("지금 마음은", fontSize = 12.sp, color = Color.Gray) }
-            item { Text(chosen.word, fontSize = 32.sp, fontWeight = FontWeight.Bold, color = color) }
+            item {
+                Text(
+                    chosen.word, fontSize = wordSize, fontWeight = FontWeight.Bold,
+                    color = color, textAlign = TextAlign.Center
+                )
+            }
             item { Text(chosen.meaning, textAlign = TextAlign.Center, fontSize = 13.sp) }
             item {
                 Button(
@@ -280,8 +314,15 @@ fun ResultScreen(check: CheckState, onSave: (String) -> Unit) {
                 ) { Text("기록", color = Color.Black) }
             }
             item { Text("다른 단어가 더 맞나요?", fontSize = 11.sp, color = Color.Gray) }
-            items(words.filter { it != chosen }) { w ->
+            items(shown) { w ->
                 CompactChip(onClick = { chosen = w }, label = { Text(w.word) })
+            }
+            if (!showAll && others.size > FIRST_SHOWN) item {
+                CompactChip(
+                    onClick = { showAll = true },
+                    label = { Text("더 보기 (+${others.size - FIRST_SHOWN})") },
+                    colors = ChipDefaults.secondaryChipColors(),
+                )
             }
         }
     }

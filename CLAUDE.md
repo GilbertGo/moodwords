@@ -1,6 +1,6 @@
 # 감정단어 (MoodWords) — 작업 안내
 
-Wear OS(갤럭시워치) 앱. 심박 측정 → 질문 2개 → 감정 단어와 뜻 → 기록.
+Wear OS(갤럭시워치) 앱. 심박 측정 → 질문 3개(에너지 확인, 기분, 무엇 때문에) → 감정 단어와 뜻 → 기록.
 사용자는 **폰만으로** 작업함. 컴퓨터·Android Studio 없음. 답변은 한국어, 폰 화면에 맞게 짧게.
 
 ## 빌드와 배포 (반드시 이 방식)
@@ -25,8 +25,9 @@ Wear OS(갤럭시워치) 앱. 심박 측정 → 질문 2개 → 감정 단어와
 - APK는 폰 브라우저로 Releases에서 받기. 소스 zip 폴더와 헷갈리지 않게 안내.
 
 ## 코드 구조
-- `EmotionWords.kt` 에너지×기분 3×3, 28개 단어와 뜻, 심박→에너지 추정
+- `app/src/main/assets/emotions.json` 감정 단어 약 1,055개. 필드: w 단어, m 뜻(해요체 한 문장), e HIGH/MID/LOW, v GOOD/NEUTRAL/BAD, c 원인 태그(PEOPLE/WORK/SELF/BODY/ANY), r 흔함 1~3. 단어 추가 시 기존과 중복 금지
+- `EmotionWords.kt` JSON 로드, 칸+원인으로 후보 정렬(원인 일치 → 흔한 말 순), 심박→에너지 추정
 - `HeartRate.kt` Health Services 심박 Flow (Guava 의존성 필요)
 - `MoodStore.kt` SharedPreferences 기록, 안정 심박 학습
-- `MainActivity.kt` 화면: home → measure → energy → valence → result → history
+- `MainActivity.kt` 화면: home → measure → energy → valence → cause → result → history
 - `Updater.kt` 업데이트 확인·설치 (PackageInstaller)
