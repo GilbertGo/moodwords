@@ -604,7 +604,7 @@ private fun WeekScreen(store: MoodStore, onBack: () -> Unit) {
             if (w.needsCare) {
                 Spacer(Modifier.height(10.dp))
                 Text(
-                    "힘든 날이 많았던 한 주네요. 혼자 견디지 말고 가까운 사람이나 전문가에게 이야기해 보세요. 109(자살예방 상담전화)는 24시간 열려 있어요.",
+                    "힘든 날이 많았던 한 주네요. 혼자 견디지 말고 가까운 사람이나 전문가에게 이야기해 보세요. 보건복지부 자살예방 상담전화 109에서 도움을 받을 수 있어요.",
                     fontSize = 14.sp, lineHeight = 21.sp, color = Color(0xFF5B4BDB)
                 )
             }
