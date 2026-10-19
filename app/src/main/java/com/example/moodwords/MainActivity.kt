@@ -173,9 +173,6 @@ fun HomeScreen(onStart: () -> Unit, onHistory: () -> Unit) {
     }
 }
 
-/** Wear OS 6(API 36)부터 쓰이는 새 심박 권한 */
-private const val HR_PERMISSION_NEW = "android.permission.health.READ_HEART_RATE"
-
 /** 측정 결과: 가만히 있을 때의 평균 심박과 떨림 */
 data class Measurement(val bpm: Int?, val tremor: Double?, val moved: Boolean)
 
