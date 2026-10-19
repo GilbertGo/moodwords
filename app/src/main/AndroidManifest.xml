@@ -8,9 +8,7 @@
     <!-- Wear OS 6(API 36) 이상에서 쓰이는 새 심박 권한 -->
     <uses-permission android:name="android.permission.health.READ_HEART_RATE" />
 
-    <!-- 앱 내 업데이트: GitHub에서 새 버전 확인·다운로드·설치 -->
-    <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- 인터넷·설치 권한과 업데이트 수신기는 shared 모듈에서 합쳐짐 -->
 
     <application
         android:allowBackup="true"
@@ -32,8 +30,5 @@
             </intent-filter>
         </activity>
 
-        <receiver
-            android:name=".InstallResultReceiver"
-            android:exported="false" />
     </application>
 </manifest>

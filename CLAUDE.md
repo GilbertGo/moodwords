@@ -1,11 +1,11 @@
 # 감정단어 (MoodWords) — 작업 안내
 
-Wear OS(갤럭시워치) 앱. 심박 측정 → 질문 3개(에너지 확인, 기분, 무엇 때문에) → 감정 단어와 뜻 → 기록.
+Wear OS(갤럭시워치) 앱 + 안드로이드 폰 앱(워치 없는 사람용, 심박 대신 에너지 질문). 워치: 심박 측정 → 질문 3개(에너지 확인, 기분, 무엇 때문에) → 감정 단어와 뜻 → 기록.
 사용자는 **폰만으로** 작업함. 컴퓨터·Android Studio 없음. 답변은 한국어, 폰 화면에 맞게 짧게.
 
 ## 빌드와 배포 (반드시 이 방식)
 - Claude 작업 환경에서는 Google 서버(dl.google.com, maven.google.com)가 막혀 있어 **로컬 빌드 불가**. 시도하지 말 것.
-- `main`에 push → GitHub Actions(`.github/workflows/build-apk.yml`)가 서명된 release APK 빌드 → Releases에 `build-<run_number>` 태그로 `MoodWords.apk` 업로드.
+- `main`에 push → GitHub Actions(`.github/workflows/build-apk.yml`)가 서명된 release APK 2개 빌드 → 워치: `build-<N>` 태그(최신 릴리스) `MoodWords.apk`, 폰: `phone-<N>` 태그(pre-release) `MoodWords-phone.apk`. 폰 릴리스를 latest로 만들지 말 것(구버전 워치 앱이 releases/latest를 봄).
 - 빌드 확인은 공개 API로: `https://api.github.com/repos/GilbertGo/moodwords/actions/runs` (인증 불필요).
 - 빌드 실패 시 원인은 check-run annotations로 확인: `.../check-runs/<job_id>/annotations`. 워크플로가 `e:` 와 `What went wrong` 줄을 주석으로 올리도록 되어 있음.
 - 커밋 후 반드시 push.
@@ -25,9 +25,12 @@ Wear OS(갤럭시워치) 앱. 심박 측정 → 질문 3개(에너지 확인, �
 - APK는 폰 브라우저로 Releases에서 받기. 소스 zip 폴더와 헷갈리지 않게 안내.
 
 ## 코드 구조
-- `app/src/main/assets/emotions.json` 감정 단어 약 1,055개. 필드: w 단어, m 뜻(해요체 한 문장), e HIGH/MID/LOW, v GOOD/NEUTRAL/BAD, c 원인 태그(PEOPLE/WORK/SELF/BODY/ANY), r 흔함 1~3. 단어 추가 시 기존과 중복 금지
+- 모듈: `app`(워치), `phone`(폰, Material3), `shared`(단어 사전·기록·업데이트, 패키지 com.example.moodwords)
+- `shared/src/main/assets/emotions.json` 감정 단어 1,260개. 필드: w 단어, m 뜻(해요체 한 문장), e HIGH/MID/LOW, v GOOD/NEUTRAL/BAD, c 원인 태그(PEOPLE/WORK/SELF/BODY/ANY), r 흔함 1~3, (선택) s 논문 표기·p 쾌·a 활성화. 단어 추가 시 기존과 중복 금지
+- 연구 근거: 박인조·민경환(2005) 434개 평정. 쾌 ≥4.5 GOOD, ≤3.5 BAD / 활성화 ≥4.8 HIGH, ≤3.8 LOW. 친숙성 3 미만 단어는 사전 뜻 기준 위치 유지. 429개 연결됨
 - `EmotionWords.kt` JSON 로드, 칸+원인으로 후보 정렬(원인 일치 → 흔한 말 순), 심박→에너지 추정
 - `HeartRate.kt` Health Services 심박 Flow (Guava 의존성 필요)
 - `MoodStore.kt` SharedPreferences 기록, 안정 심박 학습
 - `MainActivity.kt` 화면: home → measure → energy → valence → cause → result → history
-- `Updater.kt` 업데이트 확인·설치 (PackageInstaller)
+- `Updater.kt` 업데이트 확인·설치 (Channel WATCH/PHONE, PackageInstaller)
+- `phone/.../PhoneActivity.kt` 홈(3×3 지도) → 질문 3개 → 결과(근거 표시) → 기록, 연구 근거 화면

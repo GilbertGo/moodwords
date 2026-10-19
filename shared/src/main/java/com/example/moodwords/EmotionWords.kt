@@ -1,7 +1,6 @@
 package com.example.moodwords
 
 import android.content.Context
-import androidx.compose.ui.graphics.Color
 import org.json.JSONArray
 
 /** 몸의 에너지(각성) 수준 — 심박으로 추정하고 사용자가 확인/수정 */
@@ -26,10 +25,23 @@ data class EmotionWord(
     val valence: Valence,
     val causes: Set<Cause>,
     val rarity: Int,          // 1 흔함 ~ 3 드묾
+    val research: Research? = null,
 )
 
+/** 연구 근거: 박인조·민경환(2005) 한국어 감정단어 434개 평정 (7점 척도, 대학생 약 120명) */
+data class Research(
+    val sourceWord: String,   // 논문 표기 (예: 설레다)
+    val pleasure: Double,     // 쾌-불쾌 1(매우 불쾌) ~ 7(매우 쾌)
+    val activation: Double,   // 활성화 1(매우 비활성) ~ 7(매우 활성)
+) {
+    companion object {
+        const val CITATION = "박인조·민경환 (2005). 한국어 감정단어의 목록과 정서 차원 탐색. 한국심리학회지: 사회 및 성격, 19(1), 109–129."
+        const val SHORT = "박인조·민경환(2005)"
+    }
+}
+
 /**
- * 감정 단어 사전 (assets/emotions.json, 약 1,000개).
+ * 감정 단어 사전 (assets/emotions.json, 1,260개 중 429개는 박인조·민경환(2005) 평정 근거).
  * 에너지 × 기분 9칸에 나뉘어 있고, 각 단어에 "무엇 때문에" 태그가 붙어 있음.
  */
 object EmotionWords {
@@ -51,6 +63,7 @@ object EmotionWords {
                 valence = Valence.valueOf(o.getString("v")),
                 causes = (0 until c.length()).mapNotNull { runCatching { Cause.valueOf(c.getString(it)) }.getOrNull() }.toSet(),
                 rarity = o.optInt("r", 2),
+                research = if (o.has("s")) Research(o.getString("s"), o.getDouble("p"), o.getDouble("a")) else null,
             )
         }
     }
@@ -61,20 +74,26 @@ object EmotionWords {
      */
     fun find(context: Context, energy: Energy, valence: Valence, cause: Cause): List<EmotionWord> {
         val cell = load(context).filter { it.energy == energy && it.valence == valence }
-        if (cause == Cause.ANY) return cell.sortedBy { it.rarity }
+        // 흔한 말 먼저, 같은 등급이면 연구 근거가 있는 단어 먼저
+        val order = compareBy<EmotionWord>({ it.rarity }, { if (it.research != null) 0 else 1 })
+        if (cause == Cause.ANY) return cell.sortedWith(order)
         val (match, rest) = cell.partition { cause in it.causes }
-        return match.sortedBy { it.rarity } + rest.sortedBy { it.rarity }
+        return match.sortedWith(order) + rest.sortedWith(order)
     }
 
     /** 원인에 딱 맞는 단어가 몇 개인지 (결과 화면 안내용) */
     fun matchCount(words: List<EmotionWord>, cause: Cause): Int =
         if (cause == Cause.ANY) words.size else words.count { cause in it.causes }
 
-    fun colorOf(valence: Valence): Color = when (valence) {
-        Valence.GOOD -> Color(0xFFFFC94A)
-        Valence.NEUTRAL -> Color(0xFF8FB8FF)
-        Valence.BAD -> Color(0xFFB98AFF)
+    /** 기분 방향별 색 (ARGB). 각 앱에서 Color(argbOf(v))로 사용 */
+    fun argbOf(valence: Valence): Long = when (valence) {
+        Valence.GOOD -> 0xFFFFC94A
+        Valence.NEUTRAL -> 0xFF8FB8FF
+        Valence.BAD -> 0xFFB98AFF
     }
+
+    fun count(context: Context): Int = load(context).size
+    fun researchCount(context: Context): Int = load(context).count { it.research != null }
 
     /** 평소 안정 심박 대비 지금 심박으로 에너지 수준 추정 */
     fun estimateEnergy(bpm: Double, restingBpm: Double): Energy {

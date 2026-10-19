@@ -49,6 +49,7 @@ android {
 }
 
 dependencies {
+    implementation(project(":shared"))
     implementation("androidx.activity:activity-compose:1.9.3")
     implementation("androidx.wear.compose:compose-material:1.4.0")
     implementation("androidx.wear.compose:compose-foundation:1.4.0")

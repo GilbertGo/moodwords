@@ -8,36 +8,51 @@ import android.content.pm.PackageInstaller
 import android.widget.Toast
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import org.json.JSONObject
+import org.json.JSONArray
 import java.net.HttpURLConnection
 import java.net.URL
 
 /**
- * GitHub Releases에서 새 버전을 확인하고, 워치에서 바로 내려받아 설치.
+ * GitHub Releases에서 새 버전을 확인하고, 기기에서 바로 내려받아 설치.
  * 안드로이드 정책상 마지막에 사용자가 "설치"를 한 번 눌러야 함.
+ *
+ * 릴리스 규칙: 워치는 태그 build-N / MoodWords.apk,
+ *            폰은 태그 phone-N / MoodWords-phone.apk (pre-release)
  */
 object Updater {
-    private const val LATEST = "https://api.github.com/repos/GilbertGo/moodwords/releases/latest"
+    private const val RELEASES = "https://api.github.com/repos/GilbertGo/moodwords/releases?per_page=20"
+
+    data class Channel(val tagPrefix: String, val assetName: String)
+
+    val WATCH = Channel("build-", "MoodWords.apk")
+    val PHONE = Channel("phone-", "MoodWords-phone.apk")
 
     data class Release(val version: Int, val apkUrl: String)
 
     /** 지금 설치된 것보다 새 버전이 있으면 반환, 없거나 오프라인이면 null */
-    suspend fun checkNewer(): Release? = withContext(Dispatchers.IO) {
+    suspend fun checkNewer(channel: Channel, currentVersion: Int): Release? = withContext(Dispatchers.IO) {
         runCatching {
-            val conn = (URL(LATEST).openConnection() as HttpURLConnection).apply {
+            val conn = (URL(RELEASES).openConnection() as HttpURLConnection).apply {
                 setRequestProperty("Accept", "application/vnd.github+json")
                 connectTimeout = 10_000
                 readTimeout = 10_000
             }
-            val json = conn.inputStream.bufferedReader().use { JSONObject(it.readText()) }
-            val version = json.getString("tag_name").removePrefix("build-").toInt()
-            val assets = json.getJSONArray("assets")
-            val apk = (0 until assets.length())
-                .map { assets.getJSONObject(it) }
-                .first { it.getString("name").endsWith(".apk") }
-                .getString("browser_download_url")
-            Release(version, apk)
-        }.getOrNull()?.takeIf { it.version > BuildConfig.VERSION_CODE }
+            val arr = conn.inputStream.bufferedReader().use { JSONArray(it.readText()) }
+            (0 until arr.length()).asSequence()
+                .map { arr.getJSONObject(it) }
+                .filter { it.getString("tag_name").startsWith(channel.tagPrefix) }
+                .mapNotNull { rel ->
+                    val version = rel.getString("tag_name").removePrefix(channel.tagPrefix).toIntOrNull()
+                        ?: return@mapNotNull null
+                    val assets = rel.getJSONArray("assets")
+                    val apk = (0 until assets.length())
+                        .map { assets.getJSONObject(it) }
+                        .firstOrNull { it.getString("name") == channel.assetName }
+                        ?.getString("browser_download_url") ?: return@mapNotNull null
+                    Release(version, apk)
+                }
+                .maxByOrNull { it.version }
+        }.getOrNull()?.takeIf { it.version > currentVersion }
     }
 
     /** APK를 받아 시스템 설치 화면을 띄움 */

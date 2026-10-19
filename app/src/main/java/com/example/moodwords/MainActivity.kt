@@ -102,7 +102,7 @@ fun HomeScreen(onStart: () -> Unit, onHistory: () -> Unit) {
     var error by remember { mutableStateOf<String?>(null) }
 
     // 앱을 열 때마다 GitHub에 새 버전이 있는지 확인
-    LaunchedEffect(Unit) { update = Updater.checkNewer() }
+    LaunchedEffect(Unit) { update = Updater.checkNewer(Updater.WATCH, BuildConfig.VERSION_CODE) }
 
     Scaffold(timeText = { TimeText() }) {
         ScalingLazyColumn(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -287,7 +287,7 @@ fun ResultScreen(check: CheckState, onSave: (String) -> Unit) {
     if (words.isEmpty()) return
     var chosen by remember(words) { mutableStateOf(words.first()) }
     var showAll by remember(words) { mutableStateOf(false) }
-    val color = EmotionWords.colorOf(valence)
+    val color = Color(EmotionWords.argbOf(valence))
     val others = words.filter { it != chosen }
     val shown = if (showAll) others else others.take(FIRST_SHOWN)
     // 긴 표현도 한 화면에 들어가게 글자 크기 조절
@@ -307,6 +307,14 @@ fun ResultScreen(check: CheckState, onSave: (String) -> Unit) {
                 )
             }
             item { Text(chosen.meaning, textAlign = TextAlign.Center, fontSize = 13.sp) }
+            chosen.research?.let { r ->
+                item {
+                    Text(
+                        "근거 ${Research.SHORT}\n쾌 %.1f · 각성 %.1f /7".format(r.pleasure, r.activation),
+                        textAlign = TextAlign.Center, fontSize = 10.sp, color = Color.Gray
+                    )
+                }
+            }
             item {
                 Button(
                     onClick = { onSave(chosen.word) },
@@ -342,7 +350,7 @@ fun HistoryScreen(store: MoodStore) {
             items(entries) { e ->
                 Chip(
                     onClick = {},
-                    label = { Text(e.word, color = EmotionWords.colorOf(e.valence), fontWeight = FontWeight.Bold) },
+                    label = { Text(e.word, color = Color(EmotionWords.argbOf(e.valence)), fontWeight = FontWeight.Bold) },
                     secondaryLabel = {
                         Text(fmt.format(Date(e.time)) + (e.bpm?.let { " · ${it}bpm" } ?: ""))
                     },

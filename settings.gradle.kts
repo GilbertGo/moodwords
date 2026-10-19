@@ -14,4 +14,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "MoodWords"
-include(":app")
+include(":app", ":shared", ":phone")
