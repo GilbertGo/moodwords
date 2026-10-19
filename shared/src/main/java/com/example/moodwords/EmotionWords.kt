@@ -26,6 +26,8 @@ data class EmotionWord(
     val causes: Set<Cause>,
     val rarity: Int,          // 1 흔함 ~ 3 드묾
     val research: Research? = null,
+    val poem: String = "",        // 감정을 그려 보이는 한 줄 (앱이 새로 쓴 문장)
+    val family: String = "",      // 글귀를 고르는 감정 갈래 (JOY, LONGING …)
 )
 
 /** 연구 근거: 박인조·민경환(2005) 한국어 감정단어 434개 평정 (7점 척도, 대학생 약 120명) */
@@ -64,6 +66,8 @@ object EmotionWords {
                 causes = (0 until c.length()).mapNotNull { runCatching { Cause.valueOf(c.getString(it)) }.getOrNull() }.toSet(),
                 rarity = o.optInt("r", 2),
                 research = if (o.has("s")) Research(o.getString("s"), o.getDouble("p"), o.getDouble("a")) else null,
+                poem = o.optString("pm", ""),
+                family = o.optString("f", ""),
             )
         }
     }

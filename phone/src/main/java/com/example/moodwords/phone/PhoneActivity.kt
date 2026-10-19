@@ -21,6 +21,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -363,8 +365,15 @@ private fun ResultScreen(check: Check, onSave: (String) -> Unit, onRestart: () -
                 fontSize = if (chosen.word.length <= 6) 44.sp else 32.sp,
                 fontWeight = FontWeight.Black, color = deep(valence), lineHeight = 50.sp
             )
+            if (chosen.poem.isNotBlank()) {
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    chosen.poem, fontSize = 20.sp, lineHeight = 30.sp,
+                    fontStyle = FontStyle.Italic, fontFamily = FontFamily.Serif, color = Ink
+                )
+            }
             Spacer(Modifier.height(12.dp))
-            Text(chosen.meaning, fontSize = 18.sp, lineHeight = 27.sp, color = Ink)
+            Text(chosen.meaning, fontSize = 15.sp, lineHeight = 22.sp, color = Ink.copy(alpha = 0.7f))
             Spacer(Modifier.height(16.dp))
             Text(
                 "에너지 ${energy.label} · 기분 ${valence.label} · ${cause.label}",
@@ -376,6 +385,32 @@ private fun ResultScreen(check: Check, onSave: (String) -> Unit, onRestart: () -
                     "연구 근거 · ${Research.SHORT} '${r.sourceWord}'\n쾌 %.2f · 각성 %.2f (7점 척도)".format(r.pleasure, r.activation),
                     fontSize = 12.sp, color = Muted, lineHeight = 17.sp
                 )
+            }
+        }
+
+        // 이 감정에 어울리는 글귀 (눌러서 다음 글귀)
+        val quotes = remember(chosen) { Quotes.forWord(context, chosen) }
+        var quoteIdx by remember(chosen) { mutableIntStateOf(0) }
+        quotes.getOrNull(quoteIdx % quotes.size.coerceAtLeast(1))?.let { q ->
+            Spacer(Modifier.height(16.dp))
+            Column(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(Color.White)
+                    .border(1.dp, Line, RoundedCornerShape(20.dp))
+                    .clickable(enabled = quotes.size > 1) { quoteIdx++ }
+                    .padding(20.dp)
+            ) {
+                Text("“", fontSize = 36.sp, color = deep(valence), fontFamily = FontFamily.Serif, lineHeight = 30.sp)
+                Text(q.text, fontSize = 17.sp, lineHeight = 26.sp, fontFamily = FontFamily.Serif, color = Ink)
+                if (q.original.isNotBlank()) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(q.original, fontSize = 12.sp, lineHeight = 17.sp, color = Muted)
+                }
+                Spacer(Modifier.height(10.dp))
+                Text("— ${q.source}", fontSize = 13.sp, color = Muted)
+                if (quotes.size > 1) {
+                    Spacer(Modifier.height(6.dp))
+                    Text("눌러서 다른 글귀 보기 (${quoteIdx % quotes.size + 1}/${quotes.size})", fontSize = 12.sp, color = Accent)
+                }
             }
         }
 
@@ -474,6 +509,10 @@ private fun AboutScreen(onBack: () -> Unit) {
         Section(
             "'무엇 때문에' 질문",
             "위 한국어 연구에서 쾌–불쾌 다음으로 나타난 차원은 '타인 초점 대 자기 초점'이었어요. 사람 때문인지, 나 자신 때문인지 묻는 이유예요."
+        )
+        Section(
+            "감성 문장과 글귀",
+            "단어마다 붙은 한 줄 문장은 앱이 새로 쓴 것이에요. 글귀는 저작권이 끝난 작품(1929년 이전 발표작, 고전·경전, 속담)에서만 골랐고, 외국어와 한문은 앱이 직접 우리말로 옮겼어요(‘옮김’ 표시)."
         )
         Section(
             "한계",

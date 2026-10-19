@@ -29,6 +29,8 @@ Wear OS(갤럭시워치) 앱 + 안드로이드 폰 앱(워치 없는 사람용, 
 - 모듈: `app`(워치), `phone`(폰, Material3), `shared`(단어 사전·기록·업데이트, 패키지 com.example.moodwords)
 - `shared/src/main/assets/emotions.json` 감정 단어 1,260개. 필드: w 단어, m 뜻(해요체 한 문장), e HIGH/MID/LOW, v GOOD/NEUTRAL/BAD, c 원인 태그(PEOPLE/WORK/SELF/BODY/ANY), r 흔함 1~3, (선택) s 논문 표기·p 쾌·a 활성화. 단어 추가 시 기존과 중복 금지
 - 연구 근거: 박인조·민경환(2005) 434개 평정. 쾌 ≥4.5 GOOD, ≤3.5 BAD / 활성화 ≥4.8 HIGH, ≤3.8 LOW. 친숙성 3 미만 단어는 사전 뜻 기준 위치 유지. 429개 연결됨
+- emotions.json 추가 필드: pm 감성 한 줄(앱 창작), f 감정 갈래 26개(JOY…CONFUSION)
+- `shared/src/main/assets/quotes.json` 갈래별 글귀 171개: f 갈래, t 한국어, o 원문, a 저자, k 작품, y 연도, tr 앱 번역 여부. **저작권 만료작만**(1929년 이전 발표·고전·경전·속담). 윤동주·이육사·백석·현대 작가·가사 금지. 출처 확인 안 된 것 넣지 말 것. `Quotes.kt`
 - `EmotionWords.kt` JSON 로드, 칸+원인으로 후보 정렬(원인 일치 → 흔한 말 순), 심박→에너지 추정
 - `HeartRate.kt` Health Services 심박 Flow (Guava 의존성 필요)
 - `Motion.kt` 가속도 센서 0.5초 창: movement(큰 동작 RMS, >0.8 이동 중)·tremor(약 3Hz 고역 RMS). 측정은 가만히 있는 시간 15초(최대 30초), 움직이는 동안 심박 버림. 떨림은 평소값(MoodStore.restingTremor) 대비 1.6배↑ 많음 → 에너지 한 단계 올림. 기록 6번째 필드에 tremor 저장

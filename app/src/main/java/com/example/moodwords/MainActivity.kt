@@ -15,6 +15,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -425,6 +427,8 @@ fun ResultScreen(check: CheckState, onSave: (String) -> Unit) {
     val color = Color(EmotionWords.argbOf(valence))
     val others = words.filter { it != chosen }
     val shown = if (showAll) others else others.take(FIRST_SHOWN)
+    val quotes = remember(chosen) { Quotes.forWord(context, chosen) }
+    var quoteIdx by remember(chosen) { mutableIntStateOf(0) }
     // 긴 표현도 한 화면에 들어가게 글자 크기 조절
     val wordSize = when {
         chosen.word.length <= 4 -> 32.sp
@@ -441,7 +445,25 @@ fun ResultScreen(check: CheckState, onSave: (String) -> Unit) {
                     color = color, textAlign = TextAlign.Center
                 )
             }
-            item { Text(chosen.meaning, textAlign = TextAlign.Center, fontSize = 13.sp) }
+            if (chosen.poem.isNotBlank()) item {
+                Text(
+                    chosen.poem, textAlign = TextAlign.Center, fontSize = 14.sp,
+                    fontStyle = FontStyle.Italic, color = color.copy(alpha = 0.9f)
+                )
+            }
+            item { Text(chosen.meaning, textAlign = TextAlign.Center, fontSize = 12.sp, color = Color(0xFFBBBBBB)) }
+            quotes.getOrNull(quoteIdx % quotes.size.coerceAtLeast(1))?.let { q ->
+                item {
+                    Column(
+                        Modifier.fillMaxWidth().clickable { quoteIdx++ }.padding(vertical = 6.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text("“${q.text}”", textAlign = TextAlign.Center, fontSize = 12.sp, fontStyle = FontStyle.Italic)
+                        Text("— ${q.source}", textAlign = TextAlign.Center, fontSize = 9.sp, color = Color.Gray)
+                        if (quotes.size > 1) Text("눌러서 다른 글귀", fontSize = 9.sp, color = Color.DarkGray)
+                    }
+                }
+            }
             chosen.research?.let { r ->
                 item {
                     Text(
