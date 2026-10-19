@@ -19,7 +19,7 @@ object VoiceWords {
         val t = text.replace(" ", "")
         if (t.isBlank()) return emptyList()
         val hits = formsOf(context).mapNotNull { (w, fs) ->
-            fs.filter { t.contains(it) }.maxOfOrNull { it.length }?.let { w to it }
+            fs.filter { t.contains(it) }.maxByOrNull { it.length }?.let { w to it }
         }
         // 다른 맞은 단어 안에 통째로 들어 있는 짧은 것은 뺌 (예: '불안'이 '불안정'에 맞은 경우)
         val keep = hits.filter { (w, f) -> hits.none { (o, of) -> o != w && of.length > f.length && of.contains(f) } }
