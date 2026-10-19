@@ -259,10 +259,11 @@ private fun UpdateDialog(rel: Updater.Release, onLater: () -> Unit) {
 /** 에너지 × 기분 3×3 지도 (홈 화면 장식 겸 설명) */
 @Composable
 private fun MoodGrid() {
+    // 각 칸에서 연구 근거가 있고 친숙성이 높은 단어 (emotions.json의 실제 칸과 일치)
     val samples = mapOf(
-        (Energy.HIGH to Valence.GOOD) to "설렘", (Energy.HIGH to Valence.NEUTRAL) to "놀람", (Energy.HIGH to Valence.BAD) to "불안",
-        (Energy.MID to Valence.GOOD) to "즐거움", (Energy.MID to Valence.NEUTRAL) to "덤덤함", (Energy.MID to Valence.BAD) to "서운함",
-        (Energy.LOW to Valence.GOOD) to "편안함", (Energy.LOW to Valence.NEUTRAL) to "나른함", (Energy.LOW to Valence.BAD) to "외로움",
+        (Energy.HIGH to Valence.GOOD) to "설렘", (Energy.HIGH to Valence.NEUTRAL) to "놀람", (Energy.HIGH to Valence.BAD) to "불안함",
+        (Energy.MID to Valence.GOOD) to "행복함", (Energy.MID to Valence.NEUTRAL) to "부러움", (Energy.MID to Valence.BAD) to "걱정됨",
+        (Energy.LOW to Valence.GOOD) to "편안함", (Energy.LOW to Valence.NEUTRAL) to "그리움", (Energy.LOW to Valence.BAD) to "외로움",
     )
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         for (e in Energy.entries) {
@@ -488,6 +489,7 @@ private fun AboutScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     val total = remember { EmotionWords.count(context) }
     val withResearch = remember { EmotionWords.researchCount(context) }
+    val placed = remember { EmotionWords.researchPlacedCount(context) }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp)) {
         TextButton(onClick = onBack, contentPadding = PaddingValues(0.dp)) { Text("← 처음으로", color = Muted) }
@@ -500,7 +502,7 @@ private fun AboutScreen(onBack: () -> Unit) {
         )
         Section(
             "한국어 감정 단어 연구",
-            "단어 ${"%,d".format(total)}개 중 ${"%,d".format(withResearch)}개는 대학생 약 120명이 쾌–불쾌와 활성화를 7점 척도로 평정한 한국어 감정 단어 434개 연구의 점수로 위치를 정했어요.\n\n${Research.CITATION}\n\n친숙성이 낮아 평정이 불안정한 일부 단어는 사전 뜻에 맞춰 두었고, 나머지 단어는 같은 기준으로 분류한 것이라 연구로 검증되지는 않았어요."
+            "한국어 감정단어 434개의 쾌–불쾌와 활성화를 대학생 123명씩이 7점 척도로 평정한 연구가 있어요. 앱 단어 ${"%,d".format(total)}개 중 ${"%,d".format(withResearch)}개가 이 연구의 단어이고, 그중 ${"%,d".format(placed)}개는 점수 그대로 칸을 정했어요. 나머지 ${withResearch - placed}개는 친숙성이 낮아 평정이 불안정해서 사전 뜻에 맞춰 두었어요.\n\n${Research.CITATION}\n\n연구에 없는 단어(몸 상태, 일상 표현 등)는 같은 기준으로 앱이 분류한 것이라 연구로 검증되지는 않았어요."
         )
         Section(
             "왜 이름을 붙이나요?",

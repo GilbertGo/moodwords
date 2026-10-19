@@ -30,7 +30,7 @@ data class EmotionWord(
     val family: String = "",      // 글귀를 고르는 감정 갈래 (JOY, LONGING …)
 )
 
-/** 연구 근거: 박인조·민경환(2005) 한국어 감정단어 434개 평정 (7점 척도, 대학생 약 120명) */
+/** 연구 근거: 박인조·민경환(2005) 한국어 감정단어 434개 평정 (7점 척도, 쾌–불쾌·활성화 각 대학생 123명) */
 data class Research(
     val sourceWord: String,   // 논문 표기 (예: 설레다)
     val pleasure: Double,     // 쾌-불쾌 1(매우 불쾌) ~ 7(매우 쾌)
@@ -39,11 +39,18 @@ data class Research(
     companion object {
         const val CITATION = "박인조·민경환 (2005). 한국어 감정단어의 목록과 정서 차원 탐색. 한국심리학회지: 사회 및 성격, 19(1), 109–129."
         const val SHORT = "박인조·민경환(2005)"
+
+        /** 앱의 칸 기준: 쾌 ≥4.5 좋은 쪽, ≤3.5 안 좋은 쪽 / 활성화 ≥4.8 높음, ≤3.8 낮음 */
+        fun cellOf(r: Research): Pair<Energy, Valence> {
+            val v = when { r.pleasure >= 4.5 -> Valence.GOOD; r.pleasure <= 3.5 -> Valence.BAD; else -> Valence.NEUTRAL }
+            val e = when { r.activation >= 4.8 -> Energy.HIGH; r.activation <= 3.8 -> Energy.LOW; else -> Energy.MID }
+            return e to v
+        }
     }
 }
 
 /**
- * 감정 단어 사전 (assets/emotions.json, 1,260개 중 429개는 박인조·민경환(2005) 평정 근거).
+ * 감정 단어 사전 (assets/emotions.json). 일부는 박인조·민경환(2005) 평정 근거.
  * 에너지 × 기분 9칸에 나뉘어 있고, 각 단어에 "무엇 때문에" 태그가 붙어 있음.
  */
 object EmotionWords {
@@ -98,6 +105,10 @@ object EmotionWords {
 
     fun count(context: Context): Int = load(context).size
     fun researchCount(context: Context): Int = load(context).count { it.research != null }
+
+    /** 논문 점수 기준(Research.cellOf)과 같은 칸에 놓인 단어 수 */
+    fun researchPlacedCount(context: Context): Int =
+        load(context).count { w -> w.research?.let { Research.cellOf(it) == (w.energy to w.valence) } == true }
 
     /** 평소 안정 심박 대비 지금 심박으로 에너지 수준 추정 */
     fun estimateEnergy(bpm: Double, restingBpm: Double): Energy {
