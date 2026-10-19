@@ -25,6 +25,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import com.example.moodwords.*
 import com.example.moodwords.AutoUpdate
 import kotlinx.coroutines.launch
@@ -147,50 +148,28 @@ fun PhoneApp() {
 @Composable
 private fun HomeScreen(onStart: () -> Unit, onHistory: () -> Unit, onAbout: () -> Unit) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     var update by remember { mutableStateOf<Updater.Release?>(null) }
-    var progress by remember { mutableStateOf<Float?>(null) }
-    var error by remember { mutableStateOf<String?>(null) }
-    // 앱을 열면 새 버전 확인 → 있으면 바로 자동 설치 (버튼은 실패 시 다시 시도용)
+    var showUpdate by remember { mutableStateOf(false) }
+    // 앱을 열면 새 버전 확인 → 있으면 안내 창
     LaunchedEffect(Unit) {
         update = Updater.checkNewer(Updater.PHONE, BuildConfig.VERSION_CODE)
-        update?.let { rel ->
-            progress = 0f
-            runCatching { Updater.install(context, rel) { progress = it } }
-                .onFailure { error = "다운로드 실패, 다시 눌러주세요" }
-            progress = null
-        }
+        showUpdate = update != null
     }
+    update?.let { rel -> if (showUpdate) UpdateDialog(rel, onLater = { showUpdate = false }) }
     val total = remember { EmotionWords.count(context) }
 
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 20.dp)
     ) {
         update?.let { rel ->
-            Row(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Color(0xFFE3F0E8))
-                    .clickable(enabled = progress == null) {
-                        progress = 0f; error = null
-                        scope.launch {
-                            runCatching { Updater.install(context, rel) { progress = it } }
-                                .onFailure { error = "다운로드 실패, 다시 눌러주세요" }
-                            progress = null
-                        }
-                    }
-                    .padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        progress?.let { "받는 중 ${(it * 100).roundToInt()}%" } ?: "새 버전 v1.${rel.version}이 있어요",
-                        fontWeight = FontWeight.SemiBold, color = Color(0xFF1E5A3A)
-                    )
-                    Text(error ?: "눌러서 설치하기", fontSize = 13.sp, color = Color(0xFF3B7A57))
-                }
-            }
-            Spacer(Modifier.height(16.dp))
+            // '나중에'를 눌렀어도 다시 열 수 있게 작은 알림
+            Text(
+                "🎁 새 버전 v1.${rel.version} 있어요",
+                fontSize = 14.sp, color = Color(0xFF5B4BDB), fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.clip(RoundedCornerShape(20.dp)).background(Color(0xFFEDEBFC))
+                    .clickable { showUpdate = true }.padding(horizontal = 14.dp, vertical = 8.dp)
+            )
         }
-
         Spacer(Modifier.height(40.dp))
         Text("감정단어", fontSize = 40.sp, fontWeight = FontWeight.Black, color = Ink)
         Spacer(Modifier.height(8.dp))
@@ -223,6 +202,55 @@ private fun HomeScreen(onStart: () -> Unit, onHistory: () -> Unit, onAbout: () -
             modifier = Modifier.clickable(onClick = onAbout).padding(vertical = 6.dp)
         )
         Text("v${BuildConfig.VERSION_NAME}", fontSize = 12.sp, color = Muted)
+    }
+}
+
+/** 새 버전 안내 창: 바뀐 점, 지금 → 새 버전, 업데이트 / 나중에 */
+@Composable
+private fun UpdateDialog(rel: Updater.Release, onLater: () -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var progress by remember { mutableStateOf<Float?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val violet = Color(0xFF5B4BDB)
+
+    Dialog(onDismissRequest = { if (progress == null) onLater() }) {
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(Color(0xFFF4F3F8))
+                .padding(horizontal = 24.dp, vertical = 28.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text("🎁", fontSize = 44.sp)
+            Spacer(Modifier.height(14.dp))
+            Text("새 버전이 있어요", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Ink)
+            if (rel.notes.isNotBlank()) {
+                Spacer(Modifier.height(12.dp))
+                Text(rel.notes, fontSize = 15.sp, lineHeight = 22.sp, color = Ink.copy(alpha = 0.75f), textAlign = TextAlign.Center)
+            }
+            Spacer(Modifier.height(10.dp))
+            Text("지금 v${BuildConfig.VERSION_NAME} → 새 v1.${rel.version}", fontSize = 14.sp, color = Muted)
+            Spacer(Modifier.height(22.dp))
+            TextButton(
+                onClick = {
+                    if (progress != null) return@TextButton
+                    progress = 0f; error = null
+                    scope.launch {
+                        runCatching { Updater.install(context, rel) { progress = it } }
+                            .onFailure { error = "받기 실패, 다시 눌러주세요"; progress = null }
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    progress?.let { "받는 중… ${(it * 100).roundToInt()}%" } ?: "업데이트",
+                    fontSize = 18.sp, fontWeight = FontWeight.Bold, color = violet
+                )
+            }
+            error?.let { Text(it, fontSize = 13.sp, color = Color(0xFFB3261E)) }
+            TextButton(onClick = onLater, enabled = progress == null, modifier = Modifier.fillMaxWidth()) {
+                Text("나중에", fontSize = 16.sp, color = Muted)
+            }
+        }
     }
 }
 

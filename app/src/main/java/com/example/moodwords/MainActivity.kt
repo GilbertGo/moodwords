@@ -9,6 +9,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -104,53 +105,20 @@ fun MoodWordsApp() {
 
 @Composable
 fun HomeScreen(onStart: () -> Unit, onHistory: () -> Unit) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     var update by remember { mutableStateOf<Updater.Release?>(null) }
-    var progress by remember { mutableStateOf<Float?>(null) }
-    var error by remember { mutableStateOf<String?>(null) }
+    var dismissed by rememberSaveable { mutableStateOf(false) }
 
-    // 앱을 열 때마다 GitHub에 새 버전이 있는지 확인
-    // 앱을 열면 새 버전 확인 → 있으면 바로 자동 설치 (버튼은 실패 시 다시 시도용)
-    LaunchedEffect(Unit) {
-        update = Updater.checkNewer(Updater.WATCH, BuildConfig.VERSION_CODE)
-        update?.let { rel ->
-            progress = 0f
-            runCatching { Updater.install(context, rel) { progress = it } }
-                .onFailure { error = "다운로드 실패, 다시 눌러주세요" }
-            progress = null
-        }
+    // 앱을 열 때마다 GitHub에 새 버전이 있는지 확인 → 있으면 안내 화면
+    LaunchedEffect(Unit) { update = Updater.checkNewer(Updater.WATCH, BuildConfig.VERSION_CODE) }
+
+    val rel = update
+    if (rel != null && !dismissed) {
+        UpdateScreen(rel, onLater = { dismissed = true })
+        return
     }
 
     Scaffold(timeText = { TimeText() }) {
         ScalingLazyColumn(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
-            update?.let { rel ->
-                item {
-                    Chip(
-                        onClick = {
-                            if (progress != null) return@Chip
-                            progress = 0f
-                            error = null
-                            scope.launch {
-                                runCatching { Updater.install(context, rel) { progress = it } }
-                                    .onFailure { error = "다운로드 실패, 다시 눌러주세요" }
-                                progress = null
-                            }
-                        },
-                        label = {
-                            Text(
-                                when {
-                                    progress != null -> "받는 중 ${((progress ?: 0f) * 100).roundToInt()}%"
-                                    else -> "새 버전 설치 (v1.${rel.version})"
-                                }
-                            )
-                        },
-                        secondaryLabel = error?.let { { Text(it) } },
-                        colors = ChipDefaults.chipColors(backgroundColor = Color(0xFF2E7D5B)),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-            }
             item { Text("지금 어떤 마음인가요?", textAlign = TextAlign.Center, fontSize = 16.sp) }
             item {
                 Chip(
@@ -168,7 +136,68 @@ fun HomeScreen(onStart: () -> Unit, onHistory: () -> Unit) {
                     modifier = Modifier.fillMaxWidth()
                 )
             }
+            if (rel != null) item {
+                CompactChip(
+                    onClick = { dismissed = false },
+                    label = { Text("새 버전 v1.${rel.version}") },
+                    colors = ChipDefaults.chipColors(backgroundColor = Color(0xFF5B4BDB)),
+                )
+            }
             item { Text("v${BuildConfig.VERSION_NAME}", fontSize = 10.sp, color = Color.Gray) }
+        }
+    }
+}
+
+/** 새 버전 안내: 바뀐 점, 버전, 업데이트 / 나중에 */
+@Composable
+fun UpdateScreen(rel: Updater.Release, onLater: () -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var progress by remember { mutableStateOf<Float?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val accent = Color(0xFF8B7CF6)
+
+    Scaffold(timeText = { TimeText() }) {
+        ScalingLazyColumn(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
+            item { Text("🎁", fontSize = 26.sp) }
+            item { Text("새 버전이 있어요", fontSize = 16.sp, fontWeight = FontWeight.Bold) }
+            if (rel.notes.isNotBlank()) item {
+                Text(rel.notes, fontSize = 11.sp, textAlign = TextAlign.Center, color = Color(0xFFCCCCCC))
+            }
+            item {
+                Text(
+                    "지금 v${BuildConfig.VERSION_NAME} → 새 v1.${rel.version}",
+                    fontSize = 11.sp, color = Color.Gray
+                )
+            }
+            item {
+                Chip(
+                    onClick = {
+                        if (progress != null) return@Chip
+                        progress = 0f; error = null
+                        scope.launch {
+                            runCatching { Updater.install(context, rel) { progress = it } }
+                                .onFailure { error = "받기 실패, 다시 눌러주세요"; progress = null }
+                        }
+                    },
+                    label = {
+                        Text(
+                            progress?.let { "받는 중… ${(it * 100).roundToInt()}%" } ?: "업데이트",
+                            fontWeight = FontWeight.Bold
+                        )
+                    },
+                    secondaryLabel = error?.let { { Text(it) } },
+                    colors = ChipDefaults.chipColors(backgroundColor = accent),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+            item {
+                CompactChip(
+                    onClick = onLater,
+                    label = { Text("나중에") },
+                    colors = ChipDefaults.secondaryChipColors(),
+                )
+            }
         }
     }
 }

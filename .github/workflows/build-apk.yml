@@ -46,13 +46,17 @@ jobs:
           cp app/build/outputs/apk/release/app-release.apk MoodWords.apk
           cp phone/build/outputs/apk/release/phone-release.apk MoodWords-phone.apk
 
+      # 바뀐 점: 이번 커밋 메시지 (앱의 '새 버전이 있어요' 창에 '- ' 항목이 표시됨)
+      - name: Release notes
+        run: git log -1 --pretty=%B | grep -v -E '^(Co-Authored-By|Claude-Session):' > notes.md
+
       # 워치용: build-N (최신 릴리스, 기존 워치 앱의 업데이트 확인 대상)
       - name: Publish watch release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
           name: 감정단어 워치 v1.${{ github.run_number }}
-          body: 갤럭시워치용 APK입니다. 아래 MoodWords.apk를 받으세요.
+          body_path: notes.md
           files: MoodWords.apk
           make_latest: true
 
@@ -62,7 +66,7 @@ jobs:
         with:
           tag_name: phone-${{ github.run_number }}
           name: 감정단어 폰 v1.${{ github.run_number }}
-          body: 안드로이드 폰용 APK입니다. 아래 MoodWords-phone.apk를 받아 설치하세요. (설치 시 '출처를 알 수 없는 앱' 허용 필요)
+          body_path: notes.md
           files: MoodWords-phone.apk
           prerelease: true
           make_latest: false

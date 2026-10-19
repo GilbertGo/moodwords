@@ -38,7 +38,15 @@ object Updater {
         return if (Build.VERSION.SDK_INT >= 28) info.longVersionCode.toInt() else info.versionCode
     }
 
-    data class Release(val version: Int, val apkUrl: String)
+    /** notes: 바뀐 점 요약 (릴리스 본문의 '- ' 항목을 ' · '로 이은 것) */
+    data class Release(val version: Int, val apkUrl: String, val notes: String = "")
+
+    /** 릴리스 본문(커밋 메시지)에서 바뀐 점만 짧게 뽑기 */
+    fun summarize(body: String): String {
+        val lines = body.lines().map { it.trim() }.filter { it.isNotEmpty() }
+        val bullets = lines.filter { it.startsWith("- ") }.map { it.removePrefix("- ").trim() }
+        return (bullets.ifEmpty { lines.take(1) }).take(5).joinToString(" · ")
+    }
 
     /** 지금 설치된 것보다 새 버전이 있으면 반환, 없거나 오프라인이면 null */
     suspend fun checkNewer(channel: Channel, currentVersion: Int): Release? = withContext(Dispatchers.IO) {
@@ -60,7 +68,7 @@ object Updater {
                         .map { assets.getJSONObject(it) }
                         .firstOrNull { it.getString("name") == channel.assetName }
                         ?.getString("browser_download_url") ?: return@mapNotNull null
-                    Release(version, apk)
+                    Release(version, apk, summarize(rel.optString("body", "")))
                 }
                 .maxByOrNull { it.version }
         }.getOrNull()?.takeIf { it.version > currentVersion }
