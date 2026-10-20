@@ -934,22 +934,34 @@ private fun VoiceScreen(check: Check, onNext: () -> Unit) {
     var recording by remember { mutableStateOf(false) }
     var level by remember { mutableFloatStateOf(0f) }
     var note by remember { mutableStateOf<String?>(null) }
+    var heard by remember { mutableStateOf<String?>(null) }
+    var tried by remember { mutableStateOf(false) }
     val stop = remember { AtomicBoolean(false) }
 
     fun startRecording() {
-        recording = true; stop.set(false); note = null
+        recording = true; stop.set(false); note = null; heard = null
         scope.launch {
-            val f = VoiceTone.record(stop) { level = it }
+            val r = VoiceTone.record(stop) { level = it }
             recording = false
-            if (f == null) { note = "목소리를 잘 못 들었어요. 조용한 곳에서 다시 해 보세요."; return@launch }
-            val lv = baseline.level(f)
-            baseline.add(f)
-            if (lv == null) {
-                note = "평소 목소리를 배우는 중이에요 (${baseline.count.coerceAtMost(VoiceBaseline.LEARN)}/${VoiceBaseline.LEARN}). " +
-                    "${VoiceBaseline.LEARN}번 읽고 나면 비교할 수 있어요."
+            tried = true
+            val f = r?.features
+            if (f == null) {
+                note = "목소리를 잘 못 들었어요. 조용한 곳에서 다시 해 보세요."
             } else {
-                check.voiceLevel = lv
-                check.energy = Energy.MID.shiftBy(lv)
+                val lv = baseline.level(f)
+                baseline.add(f)
+                if (lv == null) {
+                    note = if (baseline.ready) "평소 목소리를 다 배웠어요. 다음부터 비교해요."
+                    else "평소 목소리를 배우는 중이에요 (${baseline.count}/${VoiceBaseline.LEARN})."
+                } else {
+                    check.voiceLevel = lv
+                    check.energy = Energy.MID.shiftBy(lv)
+                }
+            }
+            // 들은 문장 받아쓰기 (지원하는 기기만)
+            if (r != null) {
+                heard = "받아쓰는 중…"
+                heard = VoiceTone.transcribe(context, r)?.let { "들은 문장: “$it”" } ?: "이 기기는 읽은 문장 받아쓰기를 지원하지 않아요."
             }
         }
     }
@@ -1009,6 +1021,11 @@ private fun VoiceScreen(check: Check, onNext: () -> Unit) {
                 Text("목소리가 ${it.label}", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = Accent)
             }
             note?.let { Spacer(Modifier.height(8.dp)); Text(it, fontSize = 13.sp, color = Accent, lineHeight = 19.sp) }
+            heard?.let { Spacer(Modifier.height(6.dp)); Text(it, fontSize = 14.sp, color = Ink, fontStyle = FontStyle.Italic, lineHeight = 20.sp) }
+            if (tried && !recording) {
+                Spacer(Modifier.height(12.dp))
+                Button(onClick = onNext, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)) { Text("다음 →") }
+            }
         }
         Spacer(Modifier.height(14.dp))
 
@@ -1042,10 +1059,12 @@ private fun VoiceScreen(check: Check, onNext: () -> Unit) {
                     else "찾은 단어: " + check.voiceHits.take(5).joinToString(", ") { it.word },
                     fontSize = 14.sp, color = Accent
                 )
+                Spacer(Modifier.height(12.dp))
+                Button(onClick = onNext, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)) { Text("다음 →") }
             }
         }
         Spacer(Modifier.height(20.dp))
-        val done = check.voiceLevel != null || check.spoken != null
+        val done = tried || check.spoken != null
         Button(
             onClick = onNext,
             modifier = Modifier.fillMaxWidth().height(56.dp), shape = RoundedCornerShape(16.dp),

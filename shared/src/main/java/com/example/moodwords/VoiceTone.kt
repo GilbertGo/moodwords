@@ -5,6 +5,16 @@ import android.content.Context
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.content.Intent
+import android.os.Build
+import android.os.Bundle
+import android.os.ParcelFileDescriptor
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.coroutines.resume
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
@@ -16,6 +26,9 @@ import kotlin.math.sqrt
 
 /** 목소리에서 잰 값: 높낮이(Hz), 크기(dB), 소리 낸 시간(초) */
 data class VoiceFeatures(val pitchHz: Double, val loudDb: Double, val voicedSec: Double)
+
+/** 녹음 결과: 분석 값(못 들었으면 null) + 받아쓰기에 넘길 소리 (저장하지 않음) */
+class VoiceRecording(val features: VoiceFeatures?, val pcm: ShortArray, val size: Int)
 
 /** 내 평소 목소리와 비교한 결과 (에너지 추정 보조용, 기분은 알 수 없음) */
 enum class VoiceLevel(val label: String) { HIGH("평소보다 높고 빨라요"), NORMAL("평소와 비슷해요"), LOW("평소보다 낮고 느려요") }
@@ -29,11 +42,12 @@ object VoiceTone {
     private const val RATE = 16_000
 
     /**
-     * 녹음해서 분석. 말을 시작한 뒤 1.2초 조용하면, 또는 stop 이 켜지면, 또는 10초가 지나면 끝.
+     * 녹음해서 분석. 끝나는 때: '다 읽었어요'(stop), 또는 충분히 말한 뒤 2.5초 조용함, 또는 15초.
+     * 문장 중간 쉼표에서 끊기지 않도록, 처음 0.4초로 주변 소음을 재고 그보다 큰 소리만 말로 봄.
      * onLevel: 0~1 소리 크기 (화면 막대용)
      */
     @SuppressLint("MissingPermission")
-    suspend fun record(stop: AtomicBoolean, onLevel: (Float) -> Unit): VoiceFeatures? = withContext(Dispatchers.IO) {
+    suspend fun record(stop: AtomicBoolean, onLevel: (Float) -> Unit): VoiceRecording? = withContext(Dispatchers.IO) {
         val minBuf = AudioRecord.getMinBufferSize(RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
         if (minBuf <= 0) return@withContext null
         val rec = runCatching {
@@ -41,10 +55,11 @@ object VoiceTone {
         }.getOrNull() ?: return@withContext null
         if (rec.state != AudioRecord.STATE_INITIALIZED) { rec.release(); return@withContext null }
 
-        val all = ShortArray(RATE * 10)
+        val all = ShortArray(RATE * 15)
         var n = 0
         val chunk = ShortArray(800)   // 50ms
-        var spoke = false
+        var noise = 0.0; var noiseFrames = 0
+        var speechMs = 0
         var quietMs = 0
         try {
             rec.startRecording()
@@ -55,14 +70,84 @@ object VoiceTone {
                 n += got
                 val r = rms(chunk, 0, got)
                 onLevel((r / 4000.0).coerceIn(0.0, 1.0).toFloat())
-                if (r > 700) { spoke = true; quietMs = 0 } else if (spoke) quietMs += 50
-                if (spoke && quietMs >= 1200) break
+                if (noiseFrames < 8) { noise += r; noiseFrames++; continue }   // 처음 0.4초: 주변 소음
+                val thr = max(250.0, noise / noiseFrames * 2.5)
+                if (r > thr) { speechMs += 50; quietMs = 0 } else quietMs += 50
+                // 1.5초 이상 말한 뒤에만 자동 종료 (쉼표에서 잠깐 쉬는 건 괜찮음)
+                if (speechMs >= 1500 && quietMs >= 2500) break
             }
         } finally {
             runCatching { rec.stop() }
             rec.release()
         }
-        analyze(all, n)
+        VoiceRecording(analyze(all, n), all, n)
+    }
+
+    /**
+     * 녹음한 소리를 기기 음성 인식에 넘겨 받아쓰기 (Android 13 이상).
+     * 지원하지 않는 기기면 null.
+     */
+    suspend fun transcribe(context: Context, rec: VoiceRecording): String? {
+        if (Build.VERSION.SDK_INT < 33 || rec.size < RATE / 2) return null
+        if (!SpeechRecognizer.isRecognitionAvailable(context)) return null
+        return withContext(Dispatchers.Main) {
+            withTimeoutOrNull(15_000) {
+                suspendCancellableCoroutine { cont ->
+                    val pipe = ParcelFileDescriptor.createPipe()
+                    val sr = SpeechRecognizer.createSpeechRecognizer(context)
+                    var done = false
+                    fun finish(text: String?) {
+                        if (done) return
+                        done = true
+                        runCatching { sr.destroy() }
+                        runCatching { pipe[0].close() }
+                        if (cont.isActive) cont.resume(text)
+                    }
+                    sr.setRecognitionListener(object : RecognitionListener {
+                        override fun onResults(b: Bundle?) =
+                            finish(b?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull())
+                        override fun onError(error: Int) = finish(null)
+                        override fun onReadyForSpeech(p: Bundle?) {}
+                        override fun onBeginningOfSpeech() {}
+                        override fun onRmsChanged(v: Float) {}
+                        override fun onBufferReceived(b: ByteArray?) {}
+                        override fun onEndOfSpeech() {}
+                        override fun onPartialResults(b: Bundle?) {}
+                        override fun onEvent(t: Int, b: Bundle?) {}
+                    })
+                    val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                        putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                        putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ko-KR")
+                        putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE, pipe[0])
+                        putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_CHANNEL_COUNT, 1)
+                        putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_ENCODING, AudioFormat.ENCODING_PCM_16BIT)
+                        putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_SAMPLING_RATE, RATE)
+                    }
+                    runCatching { sr.startListening(intent) }.onFailure { finish(null); return@suspendCancellableCoroutine }
+                    // 녹음한 소리 + 끝에 1초 조용함을 흘려보냄
+                    Thread {
+                        runCatching {
+                            ParcelFileDescriptor.AutoCloseOutputStream(pipe[1]).use { out ->
+                                val buf = ByteArray(3200)
+                                var i = 0
+                                val total = rec.size + RATE
+                                while (i < total) {
+                                    var k = 0
+                                    while (k < buf.size && i < total) {
+                                        val v = if (i < rec.size) rec.pcm[i].toInt() else 0
+                                        buf[k] = (v and 0xFF).toByte(); buf[k + 1] = ((v shr 8) and 0xFF).toByte()
+                                        k += 2; i++
+                                    }
+                                    out.write(buf, 0, k)
+                                    Thread.sleep(50)   // 실제 말하는 속도에 가깝게
+                                }
+                            }
+                        }
+                    }.start()
+                    cont.invokeOnCancellation { runCatching { sr.destroy() } }
+                }
+            }
+        }
     }
 
     private fun rms(a: ShortArray, from: Int, len: Int): Double {

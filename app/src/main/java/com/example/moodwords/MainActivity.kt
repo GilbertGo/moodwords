@@ -874,21 +874,34 @@ fun VoiceScreen(check: CheckState, onNext: () -> Unit) {
     var mode by remember { mutableStateOf("idle") }
     var level by remember { mutableFloatStateOf(0f) }
     var note by remember { mutableStateOf<String?>(null) }
+    var heard by remember { mutableStateOf<String?>(null) }
+    var tried by remember { mutableStateOf(false) }
     val stop = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
 
     fun startRecording() {
-        mode = "recording"; stop.set(false); note = null
+        mode = "recording"; stop.set(false); note = null; heard = null
         scope.launch {
-            val f = VoiceTone.record(stop) { level = it }
+            val r = VoiceTone.record(stop) { level = it }
             mode = "idle"
-            if (f == null) { note = "목소리를 잘 못 들었어요. 조용한 곳에서 다시 해 보세요"; return@launch }
-            val lv = baseline.level(f)
-            baseline.add(f)
-            if (lv == null) {
-                note = "평소 목소리를 배우는 중이에요 (${baseline.count.coerceAtMost(VoiceBaseline.LEARN)}/${VoiceBaseline.LEARN})"
+            tried = true
+            val f = r?.features
+            if (f == null) {
+                note = "목소리를 잘 못 들었어요. 조용한 곳에서 다시 해 보세요"
             } else {
-                check.voiceLevel = lv
-                check.energy = (sensorEnergy ?: Energy.MID).shiftBy(lv)
+                val lv = baseline.level(f)
+                baseline.add(f)
+                if (lv == null) {
+                    note = if (baseline.ready) "평소 목소리를 다 배웠어요. 다음부터 비교해요"
+                    else "평소 목소리를 배우는 중이에요 (${baseline.count}/${VoiceBaseline.LEARN})"
+                } else {
+                    check.voiceLevel = lv
+                    check.energy = (sensorEnergy ?: Energy.MID).shiftBy(lv)
+                }
+            }
+            // 들은 문장 받아쓰기 (지원하는 기기만)
+            if (r != null) {
+                heard = "받아쓰는 중…"
+                heard = VoiceTone.transcribe(context, r)?.let { "들은 문장: “$it”" } ?: "이 기기는 읽은 문장 받아쓰기를 지원하지 않아요"
             }
         }
     }
@@ -948,6 +961,11 @@ fun VoiceScreen(check: CheckState, onNext: () -> Unit) {
                     }
                     check.voiceLevel?.let { lv -> item { Text("목소리: ${lv.label}", fontSize = 12.sp, color = Color(0xFFB9AEFF)) } }
                     note?.let { n -> item { Text(n, fontSize = 11.sp, color = Color(0xFFB9AEFF), textAlign = TextAlign.Center) } }
+                    heard?.let { h -> item { Text(h, fontSize = 11.sp, fontStyle = FontStyle.Italic, textAlign = TextAlign.Center) } }
+                    if (tried || check.spoken != null) item {
+                        Chip(onClick = onNext, label = { Text("다음", fontWeight = FontWeight.Bold) },
+                            colors = ChipDefaults.primaryChipColors(), modifier = Modifier.fillMaxWidth())
+                    }
                     check.spoken?.let { sp ->
                         item { Text("“$sp”", fontSize = 12.sp, fontStyle = FontStyle.Italic, textAlign = TextAlign.Center) }
                         item {
@@ -979,11 +997,9 @@ fun VoiceScreen(check: CheckState, onNext: () -> Unit) {
                             colors = ChipDefaults.secondaryChipColors(), modifier = Modifier.fillMaxWidth()
                         )
                     }
-                    item {
-                        val done = check.voiceLevel != null || check.spoken != null
-                        Chip(onClick = onNext, label = { Text(if (done) "다음" else "건너뛰기", fontWeight = FontWeight.Bold) },
-                            colors = if (done) ChipDefaults.primaryChipColors() else ChipDefaults.secondaryChipColors(),
-                            modifier = Modifier.fillMaxWidth())
+                    if (!tried && check.spoken == null) item {
+                        Chip(onClick = onNext, label = { Text("건너뛰기") },
+                            colors = ChipDefaults.secondaryChipColors(), modifier = Modifier.fillMaxWidth())
                     }
                     item { Text("녹음은 저장하지 않아요. 받아쓰기는 기기의 음성 인식을 써요", fontSize = 9.sp, color = Color.DarkGray, textAlign = TextAlign.Center) }
                 }
