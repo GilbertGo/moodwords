@@ -50,7 +50,7 @@ import java.util.Date
 import java.util.Locale
 import kotlin.math.roundToInt
 
-private const val MEASURE_MILLIS = 15_000L
+private const val MEASURE_MILLIS = 60_000L
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -372,11 +372,11 @@ fun energyHint(check: CheckState): String {
 private const val HR_PERMISSION_NEW = "android.permission.health.READ_HEART_RATE"
 
 /** 가만히 있는 시간이 이만큼 모이면 측정 끝. 계속 움직이면 최대 MAX_MILLIS에서 끝냄 */
-private const val MAX_MILLIS = 30_000L
+private const val MAX_MILLIS = 90_000L
 
 /**
  * 1단계: 심박 + 움직임 측정.
- * 가만히 있는 시간만 15초 모아서 계산하고, 움직이는 동안은 "잠시 가만히" 안내를 띄움.
+ * 가만히 있는 시간만 60초 모아서 계산하고, 움직이는 동안은 "잠시 가만히" 안내를 띄움.
  * 진행 링은 가만히 있는 시간 기준, 최대 30초 뒤엔 무조건 다음으로.
  */
 @Composable
@@ -400,8 +400,8 @@ fun MeasureScreen(store: MoodStore, onDone: (Measurement) -> Unit) {
     val tremorSamples = remember { mutableListOf<Double>() }
 
     fun result(): Measurement {
-        // 측정 초반은 불안정하니 뒤쪽 절반만 평균
-        val bpm = hrSamples.drop(hrSamples.size / 2).takeIf { it.isNotEmpty() }?.average()?.roundToInt()
+        // 측정 초반은 불안정하니 앞쪽 3분의 1은 버리고 평균
+        val bpm = hrSamples.drop(hrSamples.size / 3).takeIf { it.isNotEmpty() }?.average()?.roundToInt()
         val tremor = tremorSamples.takeIf { it.size >= 4 }?.sorted()?.let { it[it.size / 2] } // 중앙값
         return Measurement(bpm, tremor, movedAny)
     }
