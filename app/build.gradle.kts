@@ -56,6 +56,8 @@ dependencies {
     implementation("androidx.wear.compose:compose-navigation:1.4.0")
     implementation("androidx.health:health-services-client:1.0.0")
     implementation("com.google.guava:guava:33.3.1-android")
+    implementation("androidx.wear.tiles:tiles:1.4.1")
+    implementation("androidx.wear.protolayout:protolayout:1.2.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("androidx.compose.ui:ui-tooling-preview:1.7.5")
     debugImplementation("androidx.compose.ui:ui-tooling:1.7.5")

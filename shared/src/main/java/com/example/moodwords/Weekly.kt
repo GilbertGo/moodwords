@@ -35,6 +35,8 @@ data class WeekSummary(
     val slots: Map<TimeSlot, List<MoodEntry>>,
     val causes: Map<Cause, Int>,
     val insight: String,
+    val wordsUsed: Int,                       // 이 주에 쓴 서로 다른 감정 단어 수
+    val intensity: Triple<Double, Double, Int>?,  // 이름 붙이기 전·후 세기 평균, 횟수
 ) {
     val count get() = entries.size
     fun pct(n: Int) = if (count == 0) 0 else (n * 100.0 / count).roundToInt()
@@ -68,8 +70,12 @@ object Weekly {
         val slots = TimeSlot.entries.associateWith { s -> list.filter { TimeSlot.of(it.time) == s } }
         val causes = Cause.entries.associateWith { c -> list.count { it.cause == c } }.filterValues { it > 0 }
 
+        val wordsUsed = list.flatMap { listOfNotNull(it.word, it.word2) }.toSet().size
+        val pairs = list.filter { it.before != null && it.after != null }
+        val intensity = if (pairs.isEmpty()) null
+            else Triple(pairs.map { it.before!! }.average(), pairs.map { it.after!! }.average(), pairs.size)
         return WeekSummary(start, end, list, days, valence, energy, topWords, slots, causes,
-            insight(list, valence, topWords, slots, causes, weeksAgo))
+            insight(list, valence, topWords, slots, causes, weeksAgo), wordsUsed, intensity)
     }
 
     /** 숫자에서 바로 나오는 사실만 문장으로 (해석·조언은 하지 않음) */

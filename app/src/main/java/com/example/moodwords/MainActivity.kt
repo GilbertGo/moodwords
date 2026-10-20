@@ -58,7 +58,9 @@ class MainActivity : ComponentActivity() {
         AutoUpdate.cancelBackground(this)
         // 워치용 APK가 폰에 잘못 깔린 경우: 폰용 앱으로 안내
         val isWatch = packageManager.hasSystemFeature(PackageManager.FEATURE_WATCH)
-        setContent { if (isWatch) MoodWordsApp() else WrongDeviceScreen() }
+        // 타일에서 눌러 들어오면 바로 측정부터
+        val startCheck = intent?.getBooleanExtra(MoodTileService.EXTRA_START, false) == true
+        setContent { if (isWatch) MoodWordsApp(startCheck) else WrongDeviceScreen() }
     }
 }
 
@@ -148,18 +150,23 @@ class CheckState {
     var spoken by mutableStateOf<String?>(null)            // 내 말로 말한 문장
     var voiceHits by mutableStateOf<List<EmotionWord>>(emptyList())
     var voiceLevel by mutableStateOf<VoiceLevel?>(null)    // 제시 문장 읽기 결과
+    var before by mutableStateOf<Int?>(null)               // 이름 붙이기 전 세기
     fun reset() {
+        before = null
         bpm = null; tremor = null; tremorLevel = null; moved = false; energy = null; valence = null; cause = null
         spoken = null; voiceHits = emptyList(); voiceLevel = null
     }
 }
 
 @Composable
-fun MoodWordsApp() {
+fun MoodWordsApp(startCheck: Boolean = false) {
     val context = LocalContext.current
     val store = remember { MoodStore(context) }
     val check = remember { CheckState() }
     val nav = rememberSwipeDismissableNavController()
+    LaunchedEffect(Unit) {
+        if (startCheck && Guide.seen(context)) { check.reset(); nav.navigate("measure") }
+    }
 
     MaterialTheme {
         SwipeDismissableNavHost(navController = nav, startDestination = if (Guide.seen(context)) "home" else "guide") {
@@ -191,15 +198,28 @@ fun MoodWordsApp() {
                 ValenceQuestion(check) { nav.navigate("cause") }
             }
             composable("cause") {
-                CauseQuestion(check) { nav.navigate("result") }
+                CauseQuestion(check) { nav.navigate("intensity") }
+            }
+            composable("intensity") {
+                QuestionScreen(
+                    title = "이 마음은 얼마나 강해요?",
+                    hint = "기록한 뒤에 한 번 더 물어요. 이름을 붙이면 어떻게 달라지는지 볼 수 있어요",
+                    options = (5 downTo 1).map { it to "$it · ${INTENSITY_LABELS[it - 1]}" } + (0 to "건너뛰기"),
+                    selected = check.before,
+                ) { check.before = it.takeIf { v -> v > 0 }; nav.navigate("result") }
             }
             composable("result") {
-                ResultScreen(check) { word ->
+                ResultScreen(check) { word, word2 ->
                     store.add(
-                        MoodEntry(System.currentTimeMillis(), word, check.bpm, check.energy!!, check.valence!!, check.tremor, check.cause)
+                        MoodEntry(System.currentTimeMillis(), word, check.bpm, check.energy!!, check.valence!!, check.tremor, check.cause,
+                            before = check.before, word2 = word2)
                     )
-                    nav.navigate("history") { popUpTo("home") }
+                    MoodTileService.refresh(context)
+                    nav.navigate("after") { popUpTo("home") }
                 }
+            }
+            composable("after") {
+                AfterScreen(store, check.before) { nav.navigate("history") { popUpTo("home") } }
             }
             composable("history") { HistoryScreen(store) }
             composable("week") { WeekScreen(store) }
@@ -545,7 +565,7 @@ private enum class Page { WORD, POEM, MEANING, QUOTE, SAVE }
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun ResultScreen(check: CheckState, onSave: (String) -> Unit) {
+fun ResultScreen(check: CheckState, onSave: (String, String?) -> Unit) {
     val context = LocalContext.current
     val energy = check.energy ?: return
     val valence = check.valence ?: return
@@ -561,6 +581,8 @@ fun ResultScreen(check: CheckState, onSave: (String) -> Unit) {
         )
     }
     var picking by remember { mutableStateOf(false) }
+    var mixing by remember { mutableStateOf(false) }                     // 두 번째 감정 고르는 중
+    var second by remember(words) { mutableStateOf<EmotionWord?>(null) }
     val color = Color(EmotionWords.argbOf(valence))
     val quotes = remember(chosen) { Quotes.forWord(context, chosen) }
     var quoteIdx by remember(chosen) { mutableIntStateOf(0) }
@@ -577,12 +599,23 @@ fun ResultScreen(check: CheckState, onSave: (String) -> Unit) {
     val scope = rememberCoroutineScope()
     fun next() { scope.launch { if (pager.currentPage < pages.lastIndex) pager.animateScrollToPage(pager.currentPage + 1) } }
 
-    BackHandler(enabled = picking) { picking = false }
+    BackHandler(enabled = picking || mixing) { picking = false; mixing = false }
     // 크라운·베젤 돌리기로도 넘기기
     val focus = remember { FocusRequester() }
     var rotary by remember { mutableFloatStateOf(0f) }
     LaunchedEffect(picking) { if (!picking) runCatching { focus.requestFocus() } }
 
+    if (mixing) {
+        // 같은 칸 + 다른 칸의 흔한 단어 (마음은 다른 칸끼리도 섞임)
+        val pool = remember(chosen) {
+            val same = words.filter { it != chosen }
+            same + EmotionWords.load(context).filter { it.rarity == 1 && it !in same && it != chosen }
+        }
+        OtherWords(pool, color, title = "함께 느끼는 감정은?") { w ->
+            second = w; mixing = false
+        }
+        return
+    }
     if (picking) {
         OtherWords(words.filter { it != chosen }, color) { w ->
             chosen = w; picking = false
@@ -622,7 +655,12 @@ fun ResultScreen(check: CheckState, onSave: (String) -> Unit) {
                     Page.POEM -> PoemPage(chosen.poem, color)
                     Page.MEANING -> MeaningPage(chosen, color)
                     Page.QUOTE -> QuotePage(quotes[quoteIdx % quotes.size], color, quotes.size > 1)
-                    Page.SAVE -> SavePage(chosen, color, onSave = { onSave(chosen.word) }, onOther = { picking = true })
+                    Page.SAVE -> SavePage(
+                        chosen, second, color,
+                        onSave = { onSave(chosen.word, second?.word) },
+                        onOther = { picking = true },
+                        onMix = { if (second == null) mixing = true else second = null },
+                    )
                 }
             }
         }
@@ -711,9 +749,13 @@ private fun QuotePage(q: Quote, color: Color, more: Boolean) {
 }
 
 @Composable
-private fun SavePage(w: EmotionWord, color: Color, onSave: () -> Unit, onOther: () -> Unit) {
+private fun SavePage(w: EmotionWord, second: EmotionWord?, color: Color, onSave: () -> Unit, onOther: () -> Unit, onMix: () -> Unit) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(w.word, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = color, textAlign = TextAlign.Center)
+        second?.let {
+            Text("+ ${it.word}", fontSize = 16.sp, fontWeight = FontWeight.Bold,
+                color = Color(EmotionWords.argbOf(it.valence)), textAlign = TextAlign.Center)
+        }
         Spacer(Modifier.height(4.dp))
         Text("이 마음을 남길까요?", fontSize = 12.sp, color = Color.White.copy(alpha = 0.6f))
         Spacer(Modifier.height(14.dp))
@@ -724,26 +766,25 @@ private fun SavePage(w: EmotionWord, color: Color, onSave: () -> Unit, onOther: 
             modifier = Modifier.fillMaxWidth(),
         )
         Spacer(Modifier.height(8.dp))
-        CompactChip(
-            onClick = onOther,
-            label = { Text("다른 단어 보기") },
-            colors = ChipDefaults.secondaryChipColors(),
-        )
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            CompactChip(onClick = onOther, label = { Text("바꾸기") }, colors = ChipDefaults.secondaryChipColors())
+            CompactChip(onClick = onMix, label = { Text(if (second == null) "+ 섞기" else "섞기 빼기") }, colors = ChipDefaults.secondaryChipColors())
+        }
     }
 }
 
 /** 같은 칸의 다른 단어 고르기 */
 @Composable
-private fun OtherWords(others: List<EmotionWord>, color: Color, onPick: (EmotionWord) -> Unit) {
+private fun OtherWords(others: List<EmotionWord>, color: Color, title: String = "더 가까운 말이 있나요?", onPick: (EmotionWord) -> Unit) {
     var showAll by remember { mutableStateOf(false) }
     val shown = if (showAll) others else others.take(FIRST_SHOWN)
     Scaffold(timeText = { TimeText() }) {
         ScalingLazyColumn(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
-            item { Text("더 가까운 말이 있나요?", fontSize = 12.sp, color = Color.White.copy(alpha = 0.6f)) }
+            item { Text(title, fontSize = 12.sp, color = Color.White.copy(alpha = 0.6f)) }
             items(shown) { w ->
                 Chip(
                     onClick = { onPick(w) },
-                    label = { Text(w.word, color = color, fontWeight = FontWeight.Bold) },
+                    label = { Text(w.word, color = Color(EmotionWords.argbOf(w.valence)), fontWeight = FontWeight.Bold) },
                     secondaryLabel = { Text(w.meaning, maxLines = 1) },
                     colors = ChipDefaults.secondaryChipColors(),
                     modifier = Modifier.fillMaxWidth(),
@@ -768,15 +809,21 @@ fun HistoryScreen(store: MoodStore) {
     Scaffold(timeText = { TimeText() }) {
         ScalingLazyColumn(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
             item { Text("감정 기록", fontWeight = FontWeight.Bold) }
+            val distinct = store.distinctWords()
+            if (distinct > 0) item { Text("지금까지 쓴 감정 단어 ${distinct}개", fontSize = 11.sp, color = Color(0xFFB9AEFF)) }
             if (entries.isEmpty()) item {
                 Text("아직 기록이 없어요", fontSize = 12.sp, color = Color.Gray)
             }
             items(entries) { e ->
                 Chip(
                     onClick = {},
-                    label = { Text(e.word, color = Color(EmotionWords.argbOf(e.valence)), fontWeight = FontWeight.Bold) },
+                    label = { Text(e.words, color = Color(EmotionWords.argbOf(e.valence)), fontWeight = FontWeight.Bold) },
                     secondaryLabel = {
-                        Text(fmt.format(Date(e.time)) + (e.bpm?.let { " · ${it}bpm" } ?: ""))
+                        Text(
+                            fmt.format(Date(e.time)) + (e.bpm?.let { " · ${it}bpm" } ?: "") +
+                                (if (e.before != null || e.after != null) " · 세기 ${e.before ?: "-"}→${e.after ?: "-"}" else "") +
+                                (e.note?.let { "\n$it" } ?: "")
+                        )
                     },
                     colors = ChipDefaults.secondaryChipColors(),
                     modifier = Modifier.fillMaxWidth()
@@ -839,6 +886,11 @@ fun WeekScreen(store: MoodStore) {
                         fontSize = 10.sp, color = Color.Gray, textAlign = TextAlign.Center
                     )
                 }
+                w.intensity?.let { (b, a, n) ->
+                    item { Text("이름 붙이기 전→후 세기", fontSize = 12.sp, fontWeight = FontWeight.Bold) }
+                    item { Text("평균 ${"%.1f".format(b)} → ${"%.1f".format(a)} (${n}번)", fontSize = 14.sp, color = Color(0xFFB9AEFF)) }
+                }
+                item { Text("이 주에 쓴 감정 단어 ${w.wordsUsed}개", fontSize = 11.sp, color = Color.Gray) }
                 item { Text("많이 고른 감정", fontSize = 12.sp, fontWeight = FontWeight.Bold) }
                 w.topWords.take(3).forEach { (word, n) ->
                     item {
@@ -1004,6 +1056,67 @@ fun VoiceScreen(check: CheckState, onNext: () -> Unit) {
                     item { Text("녹음은 저장하지 않아요. 받아쓰기는 기기의 음성 인식을 써요", fontSize = 9.sp, color = Color.DarkGray, textAlign = TextAlign.Center) }
                 }
             }
+        }
+    }
+}
+
+
+val INTENSITY_LABELS = listOf("아주 약함", "약함", "보통", "강함", "아주 강함")
+
+/** 기록한 뒤: 지금 세기 + 한 줄 메모(말로) */
+@Composable
+fun AfterScreen(store: MoodStore, before: Int?, onDone: () -> Unit) {
+    var after by remember { mutableStateOf<Int?>(null) }
+    var note by remember { mutableStateOf<String?>(null) }
+    var noteError by remember { mutableStateOf<String?>(null) }
+    val speech = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
+        res.data?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()?.let { note = it }
+    }
+    Scaffold(timeText = { TimeText() }) {
+        ScalingLazyColumn(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
+            item { Text("기록했어요", fontSize = 11.sp, color = Color(0xFFB9AEFF)) }
+            item { Text("이름을 붙이고 나니\n지금은 얼마나 강해요?", fontWeight = FontWeight.Bold, textAlign = TextAlign.Center) }
+            before?.let { b -> item { Text("아까는 $b · ${INTENSITY_LABELS[b - 1]}", fontSize = 11.sp, color = Color.Gray) } }
+            item {
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    for (n in 1..5) {
+                        val on = n == after
+                        Box(
+                            Modifier.size(30.dp).clip(RoundedCornerShape(15.dp))
+                                .background(if (on) Color(0xFFB9AEFF) else Color(0xFF333333))
+                                .clickable { after = n },
+                            contentAlignment = Alignment.Center,
+                        ) { Text("$n", fontSize = 14.sp, color = if (on) Color.Black else Color.White, fontWeight = FontWeight.Bold) }
+                    }
+                }
+            }
+            if (before != null && after != null) item {
+                Text("$before → $after", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFFB9AEFF))
+            }
+            item {
+                Chip(
+                    onClick = {
+                        val intent = android.content.Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                            putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL, android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                            putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, "ko-KR")
+                            putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, "무슨 일이었나요?")
+                        }
+                        runCatching { speech.launch(intent) }.onFailure { noteError = "이 기기에서는 받아쓰기를 쓸 수 없어요" }
+                    },
+                    label = { Text(if (note == null) "메모 말하기 (선택)" else "다시 말하기") },
+                    secondaryLabel = { Text(note ?: "무슨 일이었는지 한마디", maxLines = 2) },
+                    colors = ChipDefaults.secondaryChipColors(), modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            noteError?.let { e -> item { Text(e, fontSize = 10.sp, color = Color.Gray) } }
+            item {
+                Chip(
+                    onClick = { store.updateLatest(after, note); onDone() },
+                    label = { Text("저장", fontWeight = FontWeight.Bold) },
+                    colors = ChipDefaults.primaryChipColors(), modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            item { CompactChip(onClick = onDone, label = { Text("건너뛰기") }, colors = ChipDefaults.secondaryChipColors()) }
         }
     }
 }

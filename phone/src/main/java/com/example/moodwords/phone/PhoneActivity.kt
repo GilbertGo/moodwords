@@ -74,7 +74,7 @@ private val scheme = lightColorScheme(
 )
 
 // ── 화면 상태 ─────────────────────────────────────────────
-private enum class Screen { HOME, VOICE, ENERGY, VALENCE, CAUSE, RESULT, HISTORY, ABOUT, WEEK, GUIDE, RATE }
+private enum class Screen { HOME, VOICE, ENERGY, VALENCE, CAUSE, INTENSITY, RESULT, AFTER, HISTORY, ABOUT, WEEK, GUIDE, RATE }
 
 private class Check {
     var energy by mutableStateOf<Energy?>(null)
@@ -83,7 +83,8 @@ private class Check {
     var spoken by mutableStateOf<String?>(null)
     var voiceHits by mutableStateOf<List<EmotionWord>>(emptyList())
     var voiceLevel by mutableStateOf<VoiceLevel?>(null)
-    fun reset() { energy = null; valence = null; cause = null; spoken = null; voiceHits = emptyList(); voiceLevel = null }
+    var before by mutableStateOf<Int?>(null)          // 이름 붙이기 전 세기
+    fun reset() { energy = null; valence = null; cause = null; spoken = null; voiceHits = emptyList(); voiceLevel = null; before = null }
 }
 
 @Composable
@@ -100,7 +101,9 @@ fun PhoneApp() {
             Screen.ENERGY -> Screen.VOICE
             Screen.VALENCE -> Screen.ENERGY
             Screen.CAUSE -> Screen.VALENCE
-            Screen.RESULT -> Screen.CAUSE
+            Screen.INTENSITY -> Screen.CAUSE
+            Screen.RESULT -> Screen.INTENSITY
+            Screen.AFTER -> Screen.HISTORY
             else -> Screen.HOME
         }
     }
@@ -147,15 +150,27 @@ fun PhoneApp() {
                         hint = null,
                         options = Cause.entries.map { Triple(it, it.label, null) },
                         selected = check.cause,
-                    ) { check.cause = it; screen = Screen.RESULT }
+                    ) { check.cause = it; screen = Screen.INTENSITY }
+                    Screen.INTENSITY -> IntensityScreen(
+                        title = "이 마음은 얼마나 강해요?",
+                        hint = "단어를 고르기 전에 한 번, 기록한 뒤에 한 번 물어요. 이름을 붙이면 세기가 어떻게 달라지는지 내 기록으로 볼 수 있어요.",
+                        before = null,
+                        selected = check.before,
+                        onPick = { check.before = it; screen = Screen.RESULT },
+                        onSkip = { check.before = null; screen = Screen.RESULT },
+                    )
                     Screen.RESULT -> ResultScreen(
                         check,
-                        onSave = { word ->
-                            store.add(MoodEntry(System.currentTimeMillis(), word, null, check.energy!!, check.valence!!, null, check.cause))
-                            screen = Screen.HISTORY
+                        onSave = { word, word2 ->
+                            store.add(
+                                MoodEntry(System.currentTimeMillis(), word, null, check.energy!!, check.valence!!, null, check.cause,
+                                    before = check.before, word2 = word2)
+                            )
+                            screen = Screen.AFTER
                         },
                         onRestart = { check.reset(); screen = Screen.VOICE },
                     )
+                    Screen.AFTER -> AfterScreen(store, check.before, onDone = { screen = Screen.HISTORY })
                     Screen.HISTORY -> HistoryScreen(store, onBack = { screen = Screen.HOME })
                     Screen.ABOUT -> AboutScreen(onBack = { screen = Screen.HOME })
                     Screen.WEEK -> WeekScreen(store, onBack = { screen = Screen.HOME })
@@ -380,7 +395,7 @@ private const val FIRST_SHOWN = 12
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ResultScreen(check: Check, onSave: (String) -> Unit, onRestart: () -> Unit) {
+private fun ResultScreen(check: Check, onSave: (String, String?) -> Unit, onRestart: () -> Unit) {
     val context = LocalContext.current
     val energy = check.energy ?: return
     val valence = check.valence ?: return
@@ -396,7 +411,12 @@ private fun ResultScreen(check: Check, onSave: (String) -> Unit, onRestart: () -
         )
     }
     var showAll by remember(words) { mutableStateOf(false) }
-    val others = words.filter { it != chosen }
+    var second by remember(words) { mutableStateOf<EmotionWord?>(null) }   // 함께 섞인 감정
+    var mixing by remember(words) { mutableStateOf(false) }                 // 칩을 누르면 두 번째로
+    var query by remember(words) { mutableStateOf("") }
+    val all = remember { EmotionWords.load(context) }
+    val others = if (mixing && query.isNotBlank()) all.filter { it.word.contains(query.trim()) && it != chosen }.take(30)
+        else words.filter { it != chosen && it != second }
     val shown = if (showAll) others else others.take(FIRST_SHOWN)
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp)) {
@@ -418,6 +438,17 @@ private fun ResultScreen(check: Check, onSave: (String) -> Unit, onRestart: () -
                     chosen.poem, fontSize = 20.sp, lineHeight = 30.sp,
                     fontStyle = FontStyle.Italic, fontFamily = FontFamily.Serif, color = Ink
                 )
+            }
+            second?.let { w2 ->
+                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("+ ${w2.word}", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = deep(w2.valence))
+                    Text(
+                        "  ✕", fontSize = 18.sp, color = Muted,
+                        modifier = Modifier.clickable { second = null }.padding(4.dp)
+                    )
+                }
+                Text(w2.meaning, fontSize = 13.sp, lineHeight = 19.sp, color = Ink.copy(alpha = 0.6f))
             }
             Spacer(Modifier.height(12.dp))
             Text(chosen.meaning, fontSize = 15.sp, lineHeight = 22.sp, color = Ink.copy(alpha = 0.7f))
@@ -458,14 +489,37 @@ private fun ResultScreen(check: Check, onSave: (String) -> Unit, onRestart: () -
 
         Spacer(Modifier.height(16.dp))
         Button(
-            onClick = { onSave(chosen.word) },
+            onClick = { onSave(chosen.word, second?.word) },
             modifier = Modifier.fillMaxWidth().height(56.dp),
             shape = RoundedCornerShape(16.dp),
         ) { Text("이 단어로 기록하기", fontSize = 17.sp, fontWeight = FontWeight.SemiBold) }
 
         Spacer(Modifier.height(28.dp))
-        Text("다른 단어가 더 맞나요?", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = Ink)
-        Text("• 표시는 연구 근거가 있는 단어예요", fontSize = 12.sp, color = Muted)
+        // 바꾸기 / 섞기 전환
+        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Line.copy(alpha = 0.5f)).padding(4.dp)) {
+            listOf(false to "다른 단어로 바꾸기", true to "감정 하나 더 섞기").forEach { (m, label) ->
+                Text(
+                    label, fontSize = 14.sp, textAlign = TextAlign.Center,
+                    color = if (mixing == m) Color.White else Ink,
+                    fontWeight = if (mixing == m) FontWeight.SemiBold else FontWeight.Normal,
+                    modifier = Modifier.weight(1f).clip(RoundedCornerShape(9.dp))
+                        .background(if (mixing == m) Accent else Color.Transparent)
+                        .clickable { mixing = m; query = "" }.padding(vertical = 10.dp)
+                )
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        if (mixing) {
+            Text("설레면서 불안한 것처럼, 마음은 자주 섞여 있어요. 함께 느끼는 감정을 하나 골라 보세요.", fontSize = 13.sp, color = Muted, lineHeight = 19.sp)
+            Spacer(Modifier.height(8.dp))
+            OutlinedTextField(
+                value = query, onValueChange = { query = it },
+                placeholder = { Text("다른 칸 단어 찾기 (예: 불안)") },
+                singleLine = true, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp),
+            )
+        } else {
+            Text("• 표시는 연구 근거가 있는 단어예요", fontSize = 12.sp, color = Muted)
+        }
         Spacer(Modifier.height(10.dp))
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             shown.forEach { w ->
@@ -473,7 +527,7 @@ private fun ResultScreen(check: Check, onSave: (String) -> Unit, onRestart: () -
                     if (w.basis == Basis.AI) w.word else "• ${w.word}", fontSize = 15.sp, color = Ink,
                     modifier = Modifier.clip(RoundedCornerShape(20.dp)).background(Color.White)
                         .border(1.dp, Line, RoundedCornerShape(20.dp))
-                        .clickable { chosen = w }
+                        .clickable { if (mixing) { second = w; mixing = false; query = "" } else chosen = w }
                         .padding(horizontal = 14.dp, vertical = 9.dp)
                 )
             }
@@ -501,6 +555,8 @@ private fun HistoryScreen(store: MoodStore, onBack: () -> Unit) {
         Spacer(Modifier.height(20.dp))
         TextButton(onClick = onBack, contentPadding = PaddingValues(0.dp)) { Text("← 처음으로", color = Muted) }
         Text("감정 기록", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = Ink)
+        val distinct = remember { store.distinctWords() }
+        if (distinct > 0) Text("지금까지 쓴 감정 단어 ${distinct}개", fontSize = 15.sp, color = Accent)
         Spacer(Modifier.height(16.dp))
         if (entries.isEmpty()) {
             Text("아직 기록이 없어요.\n감정을 알아보고 기록해 보세요.", fontSize = 16.sp, color = Muted, lineHeight = 24.sp)
@@ -515,10 +571,15 @@ private fun HistoryScreen(store: MoodStore, onBack: () -> Unit) {
                     Box(Modifier.size(12.dp).clip(RoundedCornerShape(6.dp)).background(tint(e.valence)))
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
-                        Text(e.word, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = deep(e.valence))
+                        Text(e.words, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = deep(e.valence))
+                        e.note?.let { Text(it, fontSize = 14.sp, color = Ink.copy(alpha = 0.75f), lineHeight = 20.sp) }
                         Text(fmt.format(Date(e.time)), fontSize = 13.sp, color = Muted)
                     }
-                    Text("에너지 ${e.energy.label}", fontSize = 12.sp, color = Muted)
+                    Column(horizontalAlignment = Alignment.End) {
+                        if (e.before != null || e.after != null)
+                            Text("세기 ${e.before ?: "-"} → ${e.after ?: "-"}", fontSize = 12.sp, color = Accent)
+                        Text("에너지 ${e.energy.label}", fontSize = 12.sp, color = Muted)
+                    }
                 }
             }
         }
@@ -629,6 +690,20 @@ private fun WeekScreen(store: MoodStore, onBack: () -> Unit) {
             Text(w.insight, fontSize = 16.sp, lineHeight = 25.sp, color = Ink)
         }
         if (w.count == 0) return@Column
+
+        // 이름 붙이기 전·후 세기, 쓴 단어 수
+        SectionTitle("이름 붙이기 전과 후")
+        InfoCard(Color.White) {
+            val it3 = w.intensity
+            if (it3 == null) {
+                Text("감정의 세기를 기록하면 여기에 보여요.", fontSize = 14.sp, color = Muted)
+            } else {
+                Text("평균 세기 ${"%.1f".format(it3.first)} → ${"%.1f".format(it3.second)}", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Ink)
+                Text("단어를 고르기 전 → 기록한 뒤 (${it3.third}번, 5점 만점)", fontSize = 13.sp, color = Muted)
+            }
+            Spacer(Modifier.height(10.dp))
+            Text("이 주에 쓴 감정 단어 ${w.wordsUsed}개", fontSize = 15.sp, color = Accent)
+        }
 
         // 요일별 기록: 점 하나 = 기록 하나, 색 = 기분
         SectionTitle("날마다")
@@ -1123,5 +1198,94 @@ private fun MbtiPicker(ratings: Ratings) {
                 "감정 단어를 고르는 데는 쓰지 않아요. MBTI는 성격을 재는 정확한 검사가 아니어서, 참고용으로만 봐요.",
             fontSize = 12.sp, lineHeight = 18.sp, color = Muted
         )
+    }
+}
+
+
+// ── 감정 세기 ────────────────────────────────────────────
+@Composable
+private fun IntensityScreen(title: String, hint: String, before: Int?, selected: Int?, onPick: (Int) -> Unit, onSkip: () -> Unit) {
+    val labels = listOf("아주 약함", "약함", "보통", "강함", "아주 강함")
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp)) {
+        Spacer(Modifier.height(32.dp))
+        Text(title, fontSize = 26.sp, fontWeight = FontWeight.Bold, lineHeight = 34.sp, color = Ink)
+        Spacer(Modifier.height(8.dp))
+        Text(hint, fontSize = 14.sp, color = Muted, lineHeight = 20.sp)
+        before?.let {
+            Spacer(Modifier.height(10.dp))
+            Text("아까는 $it (${labels[it - 1]})", fontSize = 15.sp, color = Accent)
+        }
+        Spacer(Modifier.height(24.dp))
+        for (n in 5 downTo 1) {
+            val on = n == selected
+            Row(
+                Modifier.fillMaxWidth().padding(bottom = 10.dp).clip(RoundedCornerShape(16.dp))
+                    .background(if (on) Accent.copy(alpha = 0.08f) else Color.White)
+                    .border(1.5.dp, if (on) Accent else Line, RoundedCornerShape(16.dp))
+                    .clickable { onPick(n) }.padding(horizontal = 20.dp, vertical = 16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("$n", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Accent, modifier = Modifier.width(32.dp))
+                Text(labels[n - 1], fontSize = 18.sp, color = Ink, modifier = Modifier.weight(1f))
+                // 세기만큼 점
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    repeat(5) { i -> Box(Modifier.size(8.dp).clip(RoundedCornerShape(4.dp)).background(if (i < n) Accent else Line)) }
+                }
+            }
+        }
+        TextButton(onClick = onSkip) { Text("건너뛰기", color = Muted) }
+    }
+}
+
+/** 기록한 뒤: 지금 세기 + 한 줄 메모 */
+@Composable
+private fun AfterScreen(store: MoodStore, before: Int?, onDone: () -> Unit) {
+    var after by remember { mutableStateOf<Int?>(null) }
+    var note by remember { mutableStateOf("") }
+    val labels = listOf("아주 약함", "약함", "보통", "강함", "아주 강함")
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp)) {
+        Spacer(Modifier.height(24.dp))
+        Text("기록했어요", fontSize = 15.sp, color = Accent)
+        Spacer(Modifier.height(6.dp))
+        Text("이름을 붙이고 나니,\n지금은 얼마나 강해요?", fontSize = 26.sp, fontWeight = FontWeight.Bold, lineHeight = 34.sp, color = Ink)
+        before?.let {
+            Spacer(Modifier.height(8.dp))
+            Text("아까는 $it (${labels[it - 1]})", fontSize = 15.sp, color = Muted)
+        }
+        Spacer(Modifier.height(18.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            for (n in 1..5) {
+                val on = n == after
+                Box(
+                    Modifier.weight(1f).height(56.dp).clip(RoundedCornerShape(14.dp))
+                        .background(if (on) Accent else Color.White)
+                        .border(1.5.dp, if (on) Accent else Line, RoundedCornerShape(14.dp))
+                        .clickable { after = n },
+                    contentAlignment = Alignment.Center,
+                ) { Text("$n", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = if (on) Color.White else Ink) }
+            }
+        }
+        Row(Modifier.fillMaxWidth().padding(top = 4.dp)) {
+            Text("아주 약함", fontSize = 12.sp, color = Muted); Spacer(Modifier.weight(1f)); Text("아주 강함", fontSize = 12.sp, color = Muted)
+        }
+        if (before != null && after != null) {
+            Spacer(Modifier.height(10.dp))
+            Text("$before → $after", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Accent)
+        }
+        Spacer(Modifier.height(26.dp))
+        Text("무슨 일이었나요? (선택)", fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = Ink)
+        Text("나중에 기록을 볼 때 그때가 떠오르게 한 줄만. 키보드의 마이크로 말해도 돼요.", fontSize = 13.sp, color = Muted, lineHeight = 19.sp)
+        Spacer(Modifier.height(8.dp))
+        OutlinedTextField(
+            value = note, onValueChange = { if (it.length <= 120) note = it },
+            placeholder = { Text("예: 친구가 약속을 잊었다") },
+            modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp), minLines = 2,
+        )
+        Spacer(Modifier.height(24.dp))
+        Button(
+            onClick = { store.updateLatest(after, note); onDone() },
+            modifier = Modifier.fillMaxWidth().height(56.dp), shape = RoundedCornerShape(16.dp),
+        ) { Text("저장", fontSize = 17.sp, fontWeight = FontWeight.SemiBold) }
+        TextButton(onClick = onDone) { Text("건너뛰기", color = Muted) }
     }
 }

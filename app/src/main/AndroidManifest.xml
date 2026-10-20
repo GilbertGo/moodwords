@@ -30,5 +30,19 @@
             </intent-filter>
         </activity>
 
+        <!-- 시계 화면 타일: 바로 감정 알아보기 -->
+        <service
+            android:name=".MoodTileService"
+            android:exported="true"
+            android:label="감정단어"
+            android:permission="com.google.android.wearable.permission.BIND_TILE_PROVIDER">
+            <intent-filter>
+                <action android:name="androidx.wear.tiles.action.BIND_TILE_PROVIDER" />
+            </intent-filter>
+            <meta-data
+                android:name="androidx.wear.tiles.PREVIEW"
+                android:resource="@drawable/ic_launcher_foreground" />
+        </service>
+
     </application>
 </manifest>
