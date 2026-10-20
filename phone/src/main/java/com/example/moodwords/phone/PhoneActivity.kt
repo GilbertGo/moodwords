@@ -806,6 +806,8 @@ private fun RateScreen(onBack: () -> Unit) {
                         fontSize = 15.sp, lineHeight = 24.sp, color = Ink
                     )
                 }
+                Spacer(Modifier.height(16.dp))
+                MbtiPicker(ratings)
                 Spacer(Modifier.height(20.dp))
                 val left = remember(done) { ratings.remaining(context) }
                 if (done > 0) Text("지금까지 ${done}개 매겼어요 · 남은 단어 ${left}개", fontSize = 14.sp, color = Muted)
@@ -1074,6 +1076,51 @@ private fun VoiceScreen(check: Check, onNext: () -> Unit) {
         Text(
             "녹음은 저장하지 않아요. 문장 읽기는 이 폰 안에서만 분석하고, 높낮이·크기·빠르기 숫자만 남겨요. " +
                 "'내 말로 말하기'는 폰의 음성 인식(구글·삼성)을 쓰므로 목소리가 그 회사 서버로 갈 수 있어요.",
+            fontSize = 12.sp, lineHeight = 18.sp, color = Muted
+        )
+    }
+}
+
+
+/** 선택 항목: MBTI. 단어 추천에는 쓰지 않고, 보내는 점수에만 함께 적음 */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun MbtiPicker(ratings: Ratings) {
+    var mbti by remember { mutableStateOf(ratings.mbti) }
+    var open by remember { mutableStateOf(false) }
+    InfoCard(Color.White) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("MBTI (선택)", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = Ink)
+                Text(if (mbti.isBlank()) "안 골랐어요" else mbti, fontSize = 14.sp, color = if (mbti.isBlank()) Muted else Accent)
+            }
+            TextButton(onClick = { open = !open }) { Text(if (open) "닫기" else "고르기", color = Accent) }
+        }
+        if (open) {
+            Spacer(Modifier.height(8.dp))
+            val types = listOf(
+                "ISTJ", "ISFJ", "INFJ", "INTJ", "ISTP", "ISFP", "INFP", "INTP",
+                "ESTP", "ESFP", "ENFP", "ENTP", "ESTJ", "ESFJ", "ENFJ", "ENTJ",
+            )
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                (types + "모름·안 함").forEach { t ->
+                    val value = if (t.startsWith("모름")) "" else t
+                    val on = value == mbti
+                    Text(
+                        t, fontSize = 14.sp, color = if (on) Color.White else Ink,
+                        modifier = Modifier.clip(RoundedCornerShape(16.dp))
+                            .background(if (on) Accent else Paper)
+                            .border(1.dp, if (on) Accent else Line, RoundedCornerShape(16.dp))
+                            .clickable { mbti = value; ratings.mbti = value; open = false }
+                            .padding(horizontal = 12.dp, vertical = 7.dp)
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "왜 묻나요? 유형마다 같은 단어를 다르게 느끼는지 나중에 모인 점수로 살펴보려고요. " +
+                "감정 단어를 고르는 데는 쓰지 않아요. MBTI는 성격을 재는 정확한 검사가 아니어서, 참고용으로만 봐요.",
             fontSize = 12.sp, lineHeight = 18.sp, color = Muted
         )
     }

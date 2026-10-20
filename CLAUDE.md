@@ -42,5 +42,5 @@ Wear OS(갤럭시워치) 앱 + 안드로이드 폰 앱(워치 없는 사람용, 
 - 기록 7번째 필드 = cause
 - `Updater.kt` 업데이트 확인·설치 (Channel WATCH/PHONE, PackageInstaller)
 - `phone/.../PhoneActivity.kt` 홈(3×3 지도) → 질문 3개 → 결과(근거 표시) → 기록, 연구 근거 화면, 단어 점수 매기기(RateScreen)
-- `Ratings.kt` 앱 개선 참여: AI 분류 단어에 기분·에너지·익숙함 1~7점(10개씩, 흔한 말부터). prefs "ratings"에만 저장, '보내기'는 Android 공유 창(텍스트 CSV, 익명 참여번호). 0 = 모르는 단어. 받은 점수는 평균 내서 emotions.json 칸 재배치에 사용(같은 기준 쾌≥4.5/≤3.5, 활성화≥4.8/≤3.8)
+- `Ratings.kt` 앱 개선 참여: AI 분류 단어에 기분·에너지·익숙함 1~7점(10개씩, 흔한 말부터). prefs "ratings"에만 저장, '보내기'는 Android 공유 창(텍스트 CSV, 익명 참여번호, 선택 MBTI — MBTI는 단어 추천에 쓰지 않음). 0 = 모르는 단어. 받은 점수는 평균 내서 emotions.json 칸 재배치에 사용(같은 기준 쾌≥4.5/≤3.5, 활성화≥4.8/≤3.8)
 - 목소리(선택, 질문 전 화면): `VoiceTone.kt` 제시 문장(SENTENCE 고정) 읽기 → 기기 안 분석(높낮이·크기·소리 시간), `VoiceBaseline` 평소값(처음 3번은 학습만), 평소 대비 HIGH/LOW면 에너지 한 단계 조정(기분은 판단 안 함). `VoiceWords.kt` 내 말로 말하기(RecognizerIntent 받아쓰기) → 활용형 매칭으로 감정 단어 찾기 → 후보 맨 앞, 기분 미리 선택. 녹음 저장 금지. 화면·앱 소개에 각 방법의 의도와 한계를 사용자에게 설명

@@ -33,6 +33,11 @@ class Ratings(context: Context) {
         get() = prefs.getInt("sent", 0)
         set(v) { prefs.edit().putInt("sent", v).apply() }
 
+    /** 선택 항목: MBTI 유형 (모르거나 말하고 싶지 않으면 빈 값) */
+    var mbti: String
+        get() = prefs.getString("mbti", "") ?: ""
+        set(v) { prefs.edit().putString("mbti", v).apply() }
+
     /** 이름 없는 참여 번호: 같은 사람이 두 번 보내도 겹치지 않게 세기 위한 것 */
     private val participant: String
         get() = prefs.getString("pid", null) ?: UUID.randomUUID().toString().take(8).also {
@@ -57,7 +62,7 @@ class Ratings(context: Context) {
     /** 공유용 글. 첫 줄 안내, 그다음 표 (단어,기분,에너지,익숙함 / 0 = 모르는 단어) */
     fun exportText(version: Int): String = buildString {
         val list = all()
-        appendLine("[감정단어 점수] 참여번호 $participant · v1.$version · ${list.size}개")
+        appendLine("[감정단어 점수] 참여번호 $participant · MBTI ${mbti.ifBlank { "-" }} · v1.$version · ${list.size}개")
         appendLine("단어,기분,에너지,익숙함")
         list.forEach { appendLine("${it.word},${it.pleasure},${it.activation},${it.familiarity}") }
     }
