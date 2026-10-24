@@ -60,7 +60,9 @@ class MainActivity : ComponentActivity() {
         val isWatch = packageManager.hasSystemFeature(PackageManager.FEATURE_WATCH)
         // 타일에서 눌러 들어오면 바로 측정부터
         val startCheck = intent?.getBooleanExtra(MoodTileService.EXTRA_START, false) == true
-        setContent { if (isWatch) MoodWordsApp(startCheck) else WrongDeviceScreen() }
+        // 대화 듣기 알림에서 들어오면: 들린 단어를 후보 맨 앞에 두고 측정부터
+        val heard = intent?.getStringExtra(ListenService.EXTRA_WORD)
+        setContent { if (isWatch) MoodWordsApp(startCheck || heard != null, heard) else WrongDeviceScreen() }
     }
 }
 
@@ -159,13 +161,21 @@ class CheckState {
 }
 
 @Composable
-fun MoodWordsApp(startCheck: Boolean = false) {
+fun MoodWordsApp(startCheck: Boolean = false, heard: String? = null) {
     val context = LocalContext.current
     val store = remember { MoodStore(context) }
     val check = remember { CheckState() }
     val nav = rememberSwipeDismissableNavController()
     LaunchedEffect(Unit) {
-        if (startCheck && Guide.seen(context)) { check.reset(); nav.navigate("measure") }
+        if (startCheck && Guide.seen(context)) {
+            check.reset()
+            heard?.let { word ->
+                EmotionWords.load(context).firstOrNull { it.word == word }?.let { w ->
+                    check.voiceHits = listOf(w); check.valence = w.valence; check.spoken = "대화에서 들린 말"
+                }
+            }
+            nav.navigate("measure")
+        }
     }
 
     MaterialTheme {
@@ -176,6 +186,7 @@ fun MoodWordsApp(startCheck: Boolean = false) {
                     onHistory = { nav.navigate("history") },
                     onWeek = { nav.navigate("week") },
                     onGuide = { nav.navigate("guide") },
+                    onListen = { nav.navigate("listen") },
                 )
             }
             composable("measure") {
@@ -185,7 +196,7 @@ fun MoodWordsApp(startCheck: Boolean = false) {
                     check.moved = m.moved
                     check.tremorLevel = m.tremor?.let { tremorLevel(it, store.restingTremor) }
                     check.energy = estimateEnergy(m.bpm, check.tremorLevel, store)
-                    nav.navigate("voice") { popUpTo("home") }
+                    nav.navigate(if (check.voiceHits.isNotEmpty()) "energy" else "voice") { popUpTo("home") }
                 }
             }
             composable("voice") {
@@ -222,6 +233,7 @@ fun MoodWordsApp(startCheck: Boolean = false) {
                 AfterScreen(store, check.before) { nav.navigate("history") { popUpTo("home") } }
             }
             composable("history") { HistoryScreen(store) }
+            composable("listen") { ListenScreen { nav.popBackStack() } }
             composable("week") { WeekScreen(store) }
             composable("guide") {
                 GuideScreen {
@@ -237,7 +249,8 @@ fun MoodWordsApp(startCheck: Boolean = false) {
 }
 
 @Composable
-fun HomeScreen(onStart: () -> Unit, onHistory: () -> Unit, onWeek: () -> Unit, onGuide: () -> Unit) {
+fun HomeScreen(onStart: () -> Unit, onHistory: () -> Unit, onWeek: () -> Unit, onGuide: () -> Unit, onListen: () -> Unit) {
+    val context = LocalContext.current
     var update by remember { mutableStateOf<Updater.Release?>(null) }
     var dismissed by rememberSaveable { mutableStateOf(false) }
 
@@ -258,6 +271,16 @@ fun HomeScreen(onStart: () -> Unit, onHistory: () -> Unit, onWeek: () -> Unit, o
                     onClick = onStart,
                     label = { Text("감정 알아보기") },
                     colors = ChipDefaults.primaryChipColors(),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+            item {
+                val on = ListenService.isOn(context)
+                Chip(
+                    onClick = onListen,
+                    label = { Text(if (on) "🎧 대화 듣는 중" else "대화 듣기") },
+                    secondaryLabel = { Text(if (on) "눌러서 끄거나 바꾸기" else "감정이 들리면 알려줘요") },
+                    colors = if (on) ChipDefaults.chipColors(backgroundColor = Color(0xFF3A3360)) else ChipDefaults.secondaryChipColors(),
                     modifier = Modifier.fillMaxWidth()
                 )
             }
@@ -1117,6 +1140,98 @@ fun AfterScreen(store: MoodStore, before: Int?, onDone: () -> Unit) {
                 )
             }
             item { CompactChip(onClick = onDone, label = { Text("건너뛰기") }, colors = ChipDefaults.secondaryChipColors()) }
+        }
+    }
+}
+
+
+// ── 대화 듣기 ─────────────────────────────────────────────
+/**
+ * 켜 둔 동안 기기 음성 인식으로 내 말을 듣다가, 감정 표현이 나오면 알림으로 알려줌.
+ * 녹음하지 않고, 들은 문장도 저장하지 않음.
+ */
+@Composable
+fun ListenScreen(onDone: () -> Unit) {
+    val context = LocalContext.current
+    var on by remember { mutableStateOf(ListenService.isOn(context)) }
+    var minutes by remember { mutableIntStateOf(30) }
+    var note by remember { mutableStateOf<String?>(null) }
+    val needed = buildList {
+        add(Manifest.permission.RECORD_AUDIO)
+        if (android.os.Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
+    }
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { res ->
+        if (res[Manifest.permission.RECORD_AUDIO] == true) { ListenService.start(context, minutes); on = true; onDone() }
+        else note = "마이크 권한이 있어야 들을 수 있어요"
+    }
+    val fmt = remember { SimpleDateFormat("a h:mm", Locale.KOREA) }
+
+    Scaffold(timeText = { TimeText() }) {
+        ScalingLazyColumn(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
+            item { Text("대화 듣기", fontWeight = FontWeight.Bold) }
+            if (on) {
+                val end = ListenService.endAt(context)
+                item {
+                    Text(
+                        if (end > 0) "${fmt.format(Date(end))}까지 듣는 중" else "끌 때까지 듣는 중",
+                        fontSize = 13.sp, color = Color(0xFFB9AEFF), textAlign = TextAlign.Center
+                    )
+                }
+                item {
+                    Text(
+                        if (ListenService.usedOnDevice(context)) "워치 안에서만 받아써요"
+                        else "이 워치는 기기 안 받아쓰기가 없어 기본 음성 인식을 써요 (목소리가 서버로 갈 수 있어요)",
+                        fontSize = 10.sp, color = Color.Gray, textAlign = TextAlign.Center
+                    )
+                }
+                item {
+                    Chip(
+                        onClick = { ListenService.stop(context); on = false },
+                        label = { Text("끄기", fontWeight = FontWeight.Bold) },
+                        colors = ChipDefaults.primaryChipColors(), modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            } else {
+                item {
+                    Text(
+                        "켜 두면 내 말을 들으며 '짜증 나', '설레' 같은 감정 표현이 나올 때 진동으로 알려줘요. 눌러서 바로 기록할 수 있어요",
+                        fontSize = 11.sp, color = Color(0xFFDDDDDD), textAlign = TextAlign.Center
+                    )
+                }
+                item { Text("얼마나 들을까요?", fontSize = 12.sp, color = Color.Gray) }
+                item {
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        listOf(30 to "30분", 60 to "1시간", 0 to "계속").forEach { (m, label) ->
+                            CompactChip(
+                                onClick = { minutes = m },
+                                label = { Text(label) },
+                                colors = if (minutes == m) ChipDefaults.primaryChipColors() else ChipDefaults.secondaryChipColors(),
+                            )
+                        }
+                    }
+                }
+                item {
+                    Chip(
+                        onClick = {
+                            val missing = needed.filter { ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED }
+                            if (missing.isEmpty()) { ListenService.start(context, minutes); on = true; onDone() }
+                            else launcher.launch(missing.toTypedArray())
+                        },
+                        label = { Text("🎧 듣기 시작", fontWeight = FontWeight.Bold) },
+                        colors = ChipDefaults.primaryChipColors(), modifier = Modifier.fillMaxWidth()
+                    )
+                }
+                note?.let { n -> item { Text(n, fontSize = 11.sp, color = Color(0xFFB9AEFF)) } }
+                item {
+                    Text(
+                        "• 녹음하지 않아요. 받아쓴 문장도 저장하지 않고, 찾은 감정 단어만 알림에 보여줘요\n" +
+                            "• 상대방 목소리도 들릴 수 있어요. 함께 있는 사람에게 알려 주세요\n" +
+                            "• 같은 알림은 자주 뜨지 않게 10분 간격을 둬요\n" +
+                            "• 계속 들으면 배터리가 빨리 닳아요",
+                        fontSize = 10.sp, color = Color.Gray
+                    )
+                }
+            }
         }
     }
 }

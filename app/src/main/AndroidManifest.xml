@@ -8,6 +8,12 @@
     <!-- Wear OS 6(API 36) 이상에서 쓰이는 새 심박 권한 -->
     <uses-permission android:name="android.permission.health.READ_HEART_RATE" />
 
+    <!-- 대화 듣기: 마이크를 쓰는 포그라운드 서비스 + 알림 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+
     <!-- 인터넷·설치 권한과 업데이트 수신기는 shared 모듈에서 합쳐짐 -->
 
     <application
@@ -29,6 +35,11 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <service
+            android:name=".ListenService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
 
         <!-- 시계 화면 타일: 바로 감정 알아보기 -->
         <service
